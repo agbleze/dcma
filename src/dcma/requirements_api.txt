@@ -1,0 +1,8 @@
+Flask==3.0.3
+Flask-RESTful==0.3.10
+gunicorn==22.0.0
+numpy
+pandas 
+scikit-learn 
+joblib 
+sentence_transformers
