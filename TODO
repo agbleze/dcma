@@ -1,0 +1,12 @@
+
+1. Add entry points for preprocessing
+2. ---------------------  training
+
+
+
+
+
+
+
+1. --- other params to expose to pipline params are: CV, metrics to optimize and hyperparams in general
+

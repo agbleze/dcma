@@ -2,7 +2,7 @@ from typing import NamedTuple
 import pandas as pd
 import os
 import joblib
-
+import s3fs
 
 def get_path(folder_name: str, file_name: str):
     dirpath = os.getcwd()
@@ -73,3 +73,31 @@ def show_cross_validation_metrics(cv_result: dict, metrics: list):
 def get_model(model_path: str):
     model = joblib.load(model_path)
     return model
+
+
+def read_minio_data(data_path: str):
+    minio_access_key = os.environ["ACCESS_KEY"]
+    minio_access_secret = os.environ["SECRET_KEY"]
+    endpoint_url = os.environ["enpoint_url"]
+    
+    minio_envar = {"ACCESS_KEY": minio_access_key,
+                    "SECRET_KEY": minio_access_secret,
+                    "enpoint_url": endpoint_url
+                    }
+    
+    missing_envar = []
+    for key, envar in minio_envar.items():
+        if not envar:
+            missing_envar.append(key)
+    if missing_envar:
+        formatted_missing_var = ', '.join(f'"{item}"' for item in missing_envar)
+        raise ValueError(f"Following environment variable were not provided: {formatted_missing_var}")
+
+    fs = s3fs.S3FileSystem(key=minio_access_key,
+                           secret=minio_access_secret,
+                           client_kwargs={"endpoint_url":endpoint_url}
+                           )
+    
+    with fs.open(data_path, "rb") as f:
+        df = pd.read_csv(f)
+    return df
