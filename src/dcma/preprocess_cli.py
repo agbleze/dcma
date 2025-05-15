@@ -39,6 +39,9 @@ def main():
     parser.add_argument("--data_path",
                         type=str
                         )
+    parser.add_argument("--test_data_path",
+                        type=str
+                        )
     parser.add_argument("--read_data_from_minio",
                         type=bool
                         )
@@ -46,8 +49,10 @@ def main():
     args = parser.parse_args()
     if args.read_data_from_minio:
         X_train_convert = read_minio_data(data_path=args.data_path)
+        X_test_convert = read_minio_data(data_path=args.test_data_path)
     else:
         X_train_convert = pd.read_csv(args.data_path)
+        X_test_convert = pd.read_csv(args.test_data_path)
     
     
     categorical_features = ['category_id', 'market_id',
