@@ -45,6 +45,7 @@ def main():
     parser.add_argument("--read_data_from_minio",
                         type=bool
                         )
+    parser.add_argument("--save_bucket", type=str)
     
     args = parser.parse_args()
     if args.read_data_from_minio:
@@ -59,12 +60,12 @@ def main():
                             'customer_id', 'publisher',
                             ]
     numeric_features = ["CPC"]
-    features_to_embed = ["industry"]
+    features_to_embed = "industry"
     preprocess_pipeline = PreprocessPipeline(data=X_train_convert, 
                                              categorical_features=categorical_features,
                                             numeric_features=numeric_features,
                                             target_variable="convert",
-                                            features_to_embed="industry"
+                                            features_to_embed=features_to_embed
                                             )
     print("############  preprocessing  ###########")
     preprocessed_train_datastore = preprocess_pipeline.run_preprocess_pipeline(categorical_target="convert",
