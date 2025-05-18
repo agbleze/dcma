@@ -210,12 +210,11 @@ class FeatureEncoderStore:
     pass
 
 class PreprocessedDataStore(NamedTuple):
-    predictors: np.array
-    target: np.array
+    predictors: Union[np.array, pd.DataFrame]
+    target: Union[np.array, pd.DataFrame]
     predictor_colnames_inorder: List
-    
-    
-    
+    full_data: np.array
+    full_data_columns_in_order: List
     
 class PreprocessPipeline(object):
     def __init__(self, data: pd.DataFrame, categorical_features: List,
@@ -338,9 +337,13 @@ class PreprocessPipeline(object):
         self.preprocessed_predictor_data = preprocessed_input_data["predictors"]
         self.preprocessed_target_data = preprocessed_input_data["target"]
         self.predictor_colnames_inorder = preprocessed_input_data["predictor_colnames_inorder"]
+        self.full_data = preprocessed_input_data["full_data"]
+        self.full_data_columns_in_order = preprocessed_input_data["full_data_columns_in_order"]
         return PreprocessedDataStore(predictors=self.preprocessed_predictor_data,
                                      target=self.preprocessed_target_data,
-                                     predictor_colnames_inorder=self.predictor_colnames_inorder
+                                     predictor_colnames_inorder=self.predictor_colnames_inorder,
+                                     full_data=self.full_data,
+                                     full_data_columns_in_order=self.full_data_columns_in_order
                                      )
     
     def compute_sample_weights(self, categorical_target):
@@ -361,6 +364,7 @@ class PreprocessPipeline(object):
                                 embedding_colname=None,
                                 target=None,
                                 cal_sample_weights: bool = True,
+                                make_modelling_data: bool = True
                                 )->PreprocessedDataStore:
         os.makedirs(save_dir, exist_ok=True)
         if cal_sample_weights:
@@ -377,11 +381,18 @@ class PreprocessPipeline(object):
             embedding_colname = self.embedding_colname
         if not target:
             target = self.target_variable
-        preprocessed_data_store = self.prepare_modelling_data(predictors=predictors,
-                                                             embedding_colname=embedding_colname,
-                                                             target=target
-                                                             )  
-        return preprocessed_data_store     
+            
+        if not make_modelling_data:
+            preprocessed_data_store = PreprocessedDataStore(predictors=self.encoded_embedded_data[predictors],
+                                                            target=self.encoded_embedded_data[target],
+                                                            predictor_colnames_inorder=predictors.copy().append(embedding_colname)
+                                                            )
+        if make_modelling_data:
+            preprocessed_data_store = self.prepare_modelling_data(predictors=predictors,
+                                                                embedding_colname=embedding_colname,
+                                                                target=target
+                                                                )  
+            return preprocessed_data_store     
 
 
 
