@@ -1,0 +1,181 @@
+
+
+data ingestion with splits >> Preprocessing with derieved vars >>   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#!/usr/bin/env python3
+import argparse
+import io
+import json
+import logging
+import os
+import uuid
+from datetime import datetime
+
+import pandas as pd
+from minio import Minio
+from sklearn.model_selection import train_test_split
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run Data Ingestion Pipeline")
+    parser.add_argument("--test_size", type=float, default=0.2, help="Proportion of the dataset to be used as test set")
+    parser.add_argument("--random_state", type=int, default=2025, help="Random state for reproducing the split")
+    parser.add_argument("--stratify_variable", default=None, help="Column name to use for stratification")
+    parser.add_argument("--data_filepath", required=True, help="Path to the CSV data file")
+    parser.add_argument("--shuffle", action="store_true", default=True, help="Whether to shuffle the dataset before splitting")
+    parser.add_argument("--store_data_in_minio", action="store_true", help="Flag to store data in MinIO instead of locally")
+    parser.add_argument("--bucket_name", default="datasets", help="MinIO bucket to use (required if storing data in MinIO)")
+    # Environment variable names should be provided if using MinIO storage
+    parser.add_argument("--access_key_env_name", default="MINIO_ACCESS_KEY", help="Env var name for MinIO access key")
+    parser.add_argument("--access_secret_env_name", default="MINIO_SECRET_KEY", help="Env var name for MinIO secret key")
+    parser.add_argument("--minio_server_url_env_name", default="MINIO_SERVER_URL", help="Env var name for MinIO server URL")
+    parser.add_argument("--data_store_dir", default="metadata_store", help="Local directory to store data and metadata")
+    return parser.parse_args()
+
+def get_minio_client(args):
+    # Retrieve and validate environment variables for MinIO credentials.
+    access_key = os.getenv(args.access_key_env_name)
+    secret_key = os.getenv(args.access_secret_env_name)
+    minio_url = os.getenv(args.minio_server_url_env_name)
+    
+    if not all([access_key, secret_key, minio_url]):
+        logger.error("Missing one or more required MinIO environment variables: %s, %s, %s",
+                     args.access_key_env_name, args.access_secret_env_name, args.minio_server_url_env_name)
+        raise ValueError("MinIO configuration incomplete.")
+    
+    client = Minio(
+        endpoint=minio_url,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=False  # Consider parameterizing SSL settings if needed
+    )
+    return client
+
+def save_locally(train_df, test_df, metadata, args, dataset_uuid):
+    # Ensure all files are saved under the data_store_dir.
+    os.makedirs(args.data_store_dir, exist_ok=True)
+    train_file_path = os.path.join(args.data_store_dir, f"train_{dataset_uuid}.csv")
+    test_file_path = os.path.join(args.data_store_dir, f"test_{dataset_uuid}.csv")
+    
+    train_df.to_csv(train_file_path, index=False)
+    test_df.to_csv(test_file_path, index=False)
+    logger.info("Saved train and test CSV files locally in %s", args.data_store_dir)
+    
+    metadata_filepath = os.path.join(args.data_store_dir, f"metadata_{dataset_uuid}.json")
+    with open(metadata_filepath, "w") as fp:
+        json.dump(metadata, fp)
+    logger.info("Successfully saved metadata locally at %s", metadata_filepath)
+
+def upload_to_minio(train_df, test_df, metadata, args, dataset_uuid):
+    # Prepare CSV data using in-memory buffers
+    train_buffer = io.BytesIO()
+    test_buffer = io.BytesIO()
+    train_df.to_csv(train_buffer, index=False)
+    test_df.to_csv(test_buffer, index=False)
+    
+    # Reset the buffer pointers to the beginning for reading
+    train_buffer.seek(0)
+    test_buffer.seek(0)
+    
+    client = get_minio_client(args)
+    
+    # Ensure the bucket exists; create it if not.
+    if not client.bucket_exists(args.bucket_name):
+        client.make_bucket(args.bucket_name)
+        logger.info("Bucket '%s' did not exist and was created.", args.bucket_name)
+    
+    train_file_name = f"train_{dataset_uuid}.csv"
+    test_file_name = f"test_{dataset_uuid}.csv"
+    
+    client.put_object(
+        bucket_name=args.bucket_name,
+        object_name=train_file_name,
+        data=train_buffer,
+        length=train_buffer.getbuffer().nbytes,
+        metadata=metadata
+    )
+    logger.info("Uploaded '%s' to bucket '%s'.", train_file_name, args.bucket_name)
+    
+    client.put_object(
+        bucket_name=args.bucket_name,
+        object_name=test_file_name,
+        data=test_buffer,
+        length=test_buffer.getbuffer().nbytes,
+        metadata=metadata
+    )
+    logger.info("Uploaded '%s' to bucket '%s'.", test_file_name, args.bucket_name)
+
+def main():
+    args = parse_args()
+
+    # Generate a UUID to tag this dataset version.
+    dataset_uuid = str(uuid.uuid4())
+    
+    try:
+        data = pd.read_csv(args.data_filepath)
+        logger.info("Loaded data from %s with shape %s", args.data_filepath, data.shape)
+    except Exception as e:
+        logger.error("Error reading data file: %s", e)
+        raise
+
+    # Perform train-test split with optional stratification.
+    try:
+        train_df, test_df = train_test_split(
+            data,
+            test_size=args.test_size,
+            random_state=args.random_state,
+            stratify=data[args.stratify_variable] if args.stratify_variable else None,
+            shuffle=args.shuffle
+        )
+        logger.info("Completed train-test split. Train shape: %s, Test shape: %s", train_df.shape, test_df.shape)
+    except Exception as e:
+        logger.error("Error during train-test split: %s", e)
+        raise
+
+    # Create metadata with details for traceability.
+    creation_time = datetime.now()
+    metadata = {
+        "uid": dataset_uuid,
+        "random_state": str(args.random_state),
+        "test_size": str(args.test_size),
+        "stratify_variable": str(args.stratify_variable),
+        "shuffle": str(args.shuffle),
+        "data_used_filepath": args.data_filepath,
+        "creation_time": str(creation_time)
+    }
+
+    # Decide on storage destination based on the flag.
+    if args.store_data_in_minio:
+        try:
+            upload_to_minio(train_df, test_df, metadata, args, dataset_uuid)
+        except Exception as e:
+            logger.error("Error uploading data to MinIO: %s", e)
+            raise
+    else:
+        try:
+            save_locally(train_df, test_df, metadata, args, dataset_uuid)
+        except Exception as e:
+            logger.error("Error saving data locally: %s", e)
+            raise
+
+if __name__ == "__main__":
+    main()

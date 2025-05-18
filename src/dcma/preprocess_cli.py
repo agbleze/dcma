@@ -1,7 +1,12 @@
-from preprocess import PreprocessPipeline
 import argparse
 from utils import read_minio_data
 import pandas as pd
+from preprocess import (compute_cpa, compute_cpc,
+                        PreprocessPipeline
+                        )
+from transform import (create_binary_conversion_variable,
+                       transform_data_with_conversion
+                       )
 
 def main():
     parser = argparse.ArgumentParser(description="Run preprocess pipeline")
@@ -46,14 +51,23 @@ def main():
                         type=bool
                         )
     parser.add_argument("--save_bucket", type=str)
+    parser.add_argument("--dataset_uid")
     
     args = parser.parse_args()
     if args.read_data_from_minio:
-        X_train_convert = read_minio_data(data_path=args.data_path)
-        X_test_convert = read_minio_data(data_path=args.test_data_path)
+        train_df = read_minio_data(data_path=args.data_path)
+        test_df = read_minio_data(data_path=args.test_data_path)
     else:
-        X_train_convert = pd.read_csv(args.data_path)
-        X_test_convert = pd.read_csv(args.test_data_path)
+        train_df = pd.read_csv(args.data_path)
+        test_df = pd.read_csv(args.test_data_path)
+        
+    train_df = compute_cpa(data=train_df)
+    train_df = create_binary_conversion_variable(train_df)
+    train_df = compute_cpc(data=train_df)
+    
+    test_df = compute_cpa(data=test_df)
+    test_df = create_binary_conversion_variable(test_df)
+    test_df = compute_cpc(data=test_df)
     
     
     categorical_features = ['category_id', 'market_id',
@@ -61,7 +75,7 @@ def main():
                             ]
     numeric_features = ["CPC"]
     features_to_embed = "industry"
-    preprocess_pipeline = PreprocessPipeline(data=X_train_convert, 
+    preprocess_pipeline = PreprocessPipeline(data=train_df, 
                                              categorical_features=categorical_features,
                                             numeric_features=numeric_features,
                                             target_variable="convert",
@@ -78,15 +92,21 @@ def main():
     preprocessed_train_predictor_colnames_inorder = preprocessed_train_datastore.predictor_colnames_inorder
     sample_weight = preprocess_pipeline.sample_weight
     X_train_encoded_embedded_data = preprocess_pipeline.encoded_embedded_data
+    train_preprocessed_data = preprocessed_train_datastore.full_data
+    train_preprocessed_columns_inorder = preprocessed_train_datastore.full_data_columns_in_order
     
     ### use the encoders created for train dataset to encode test dataset 
     # and prepare it for model evaluation. This prevents data leakage and 
     # ensures model evaluation reflect model performance in terms of the encoding 
     # used during training
-    X_test_convert_encoded = preprocess_pipeline.encode_features(data=X_test_convert,
+    X_test_convert_encoded = preprocess_pipeline.encode_features(data=test_df,
                                                                  stats_to_compute="count"
                                                                  ) 
     X_test_convert_encoded_embed = preprocess_pipeline.transform_columns_to_embed(data=X_test_convert_encoded)
+    
+    return X_train_encoded_embedded_data, preprocessed_train_target_convert, X_test_convert_encoded_embed
+    
+    
     preprocess_test_datastore = preprocess_pipeline.prepare_modelling_data(predictors=preprocess_pipeline.predictors,
                                                                             embedding_colname=preprocess_pipeline.embedding_colname,
                                                                             data=X_test_convert_encoded_embed,

@@ -130,16 +130,24 @@ def prepare_data(data: pd.DataFrame,
                 ) -> tuple:
     embedding_data = np.vstack(data[embedding_colname].values.tolist())
     non_embedding_data = data[predictors].to_numpy()
-    if target is None:
-        target_data = None
-    else:
-        target_data = data[target].values
     all_predictors = np.hstack([non_embedding_data, embedding_data])
     predictor_colnames_in_order = predictors.copy()
     predictor_colnames_in_order.append(embedding_colname)
+    if target is None:
+        target_data = None
+        combined_data = all_predictors
+        combined_columns = predictor_colnames_in_order
+    else:
+        target_data = data[target].values
+    
+        combined_data = np.hstack([target_data, all_predictors])
+        combined_columns = [target] + predictor_colnames_in_order
+    
     return {"target": target_data,
             "predictors": all_predictors,
-            "predictor_colnames_inorder": predictor_colnames_in_order
+            "predictor_colnames_inorder": predictor_colnames_in_order,
+            "full_data": combined_data,
+            "full_data_columns_in_order": combined_columns
             } 
            
 

@@ -21,7 +21,7 @@ def parse_arguments():
     parser.add_argument("--random_state", default=2025, type=int, help="Random state for reproducing the split")
     parser.add_argument("--stratify_variable", required=False, default=None, help="Column name to use for stratification")
     parser.add_argument("--data_filepath", required=True, type=str, help="Path to the CSV data file")
-    parser.add_argument("--shuffle", default=False, required=False, action="store_true", 
+    parser.add_argument("--shuffle", default=False, action="store_true", 
                         help="Whether to shuffle the dataset before splitting"
                         )
     parser.add_argument("--bucket_name", required=False, default="datasets", 

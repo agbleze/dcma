@@ -7,6 +7,7 @@ from typing import Dict,List, Union, NamedTuple, Literal
 import os
 from dataclasses import dataclass
 from sklearn.utils.class_weight import compute_class_weight
+import inspect
 
 def create_frequency_table(data: pd.DataFrame, 
                             variable: str
@@ -272,7 +273,8 @@ class PreprocessPipeline(object):
     def encode_features(self, encoder_type="target_encoding",
                         stats_to_compute: str = "mean",
                         data: Union[pd.DataFrame, None] = None,
-                        encoder_values_colname: Union[str,None] = None
+                        encoder_values_colname: Union[str,None] = None,
+                        **kwargs
                         ):
         if not isinstance(data, pd.DataFrame):
             data = self.data
@@ -281,9 +283,20 @@ class PreprocessPipeline(object):
             # done on purpose to ensure it can used in the encoding process
             self.stats_to_compute = stats_to_compute
             print(f"feat_encoder_store does not exist. ... creating them for encoding")
+            _kwarg_create_encoder_records = inspect.signature(self.create_encoder_records).parameters
+            _passed_create_encoder_records_params = {k:v for k, v in kwargs.items() 
+                                                     if k in _kwarg_create_encoder_records.keys()
+                                                     }
             self.feat_encoder_store = self.create_encoder_records(encoder_type=encoder_type,
-                                                                  stats_to_compute=self.stats_to_compute
+                                                                  stats_to_compute=self.stats_to_compute,
+                                                                  **_passed_create_encoder_records_params
                                                                   )
+            
+            _kwarg_export_encoder_records = inspect.signature(self.export_encoder_records).parameters
+            _passed_export_encoder_records_params = {k:v for k, v in kwargs.items() 
+                                                     if k in _kwarg_export_encoder_records.keys()
+                                                     }
+            self.export_encoder_records(**_passed_export_encoder_records_params)
         else:
             print(f"Using already exising feat_encoder_store for encoding")
             if not encoder_values_colname:
@@ -364,17 +377,25 @@ class PreprocessPipeline(object):
                                 embedding_colname=None,
                                 target=None,
                                 cal_sample_weights: bool = True,
-                                make_modelling_data: bool = True
+                                make_modelling_data: bool = True,
+                                **kwargs
                                 )->PreprocessedDataStore:
         os.makedirs(save_dir, exist_ok=True)
         if cal_sample_weights:
             self.compute_sample_weights(categorical_target=categorical_target) 
-        self.create_encoder_records(encoder_type=encoder_type,
-                                    stats_to_compute=stats_to_compute
-                                    )   
-        self.export_encoder_records(save_dir=save_dir) 
-        self.encoded_data = self.encode_features(stats_to_compute=stats_to_compute)   
-        self.encoded_embedded_data = self.transform_columns_to_embed() 
+        # self.create_encoder_records(encoder_type=encoder_type,
+        #                             stats_to_compute=stats_to_compute
+        #                             )   
+        # self.export_encoder_records(save_dir=save_dir) 
+        _kwarg_encode_features = inspect.signature(self.encode_features).parameters
+        _passed_encode_features_params = {k:v for k, v in kwargs.items() 
+                                        if k in _kwarg_encode_features.keys()
+                                        }
+        self.encoded_data = self.encode_features(encoder_type=encoder_type,
+                                                 stats_to_compute=stats_to_compute, 
+                                                 **_passed_encode_features_params
+                                                 )   
+        self.encoded_embedded_data = self.transform_columns_to_embed(data=self.encoded_data) 
         if not predictors:
             predictors = self.predictors
         if not embedding_colname:
