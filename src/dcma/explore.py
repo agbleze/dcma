@@ -164,3 +164,30 @@ df_noembed = pd.DataFrame(data=prepared['combined'][:, feat_indexes], columns=se
 # %%
 df_noembed[prepared['columns_in_order'][-1]] = prepared['combined'][:, prepared['columns_in_order'].index(prepared['columns_in_order'][-1]):].tolist()
 # %%
+#%%
+from minio import Minio
+
+client = Minio(endpoint="127.0.0.1:9000",#"localhost:9000", 
+               access_key="minioadmin", 
+                secret_key="minioadmin",
+                secure=False
+                )
+
+
+
+#%%
+#client.bucket_exists("rawdata")
+
+
+# %%
+client.list_buckets()
+# %%
+
+#client.remove_bucket("rawdata")
+
+
+# %%
+bucket = client.list_buckets()[0]
+# %%
+bucket
+# %%

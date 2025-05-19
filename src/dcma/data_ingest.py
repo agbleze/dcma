@@ -45,12 +45,16 @@ def parse_arguments():
     parser.add_argument("--data_store_dir", default="metadata_store", 
                         help="Local directory to store data and metadata"
                         )
+    parser.add_argument("--minio_endpoint_is_secured", action="store_true",
+                        help="Whether the Minio endpoint url is secured")
     return parser.parse_args()
 
 def get_minio_client(args)->Minio:
     ACCESS_KEY = os.getenv(key=args.access_key_env_name)
     ACCESS_SECRET = os.getenv(key=args.access_secret_env_name)
     MINIO_URL = os.getenv(key=args.minio_server_url_env_name)
+    minio_endpoint_is_secured = os.getenv(key=args.minio_endpoint_is_secured)
+    
     
     env_vars = [args.access_key_env_name,
                 args.access_secret_env_name,
@@ -68,7 +72,7 @@ def get_minio_client(args)->Minio:
     
     client = Minio(endpoint=MINIO_URL, access_key=ACCESS_KEY, 
                    secret_key=ACCESS_SECRET,
-                   secure=False
+                   secure=minio_endpoint_is_secured
                    )
     return client
     
@@ -113,13 +117,6 @@ def upload_to_minio(minio_client, bucket_name,
                     objects_to_upload: List[ObjectToPersistData],
                     **kwargs
                     ):
-    # train_buffer = io.BytesIO()
-    # test_buffer = io.BytesIO()
-    # train_df.to_csv(train_buffer, index=False)
-    # test_df.to_csv(test_buffer, index=False)
-    # train_buffer.seek(0)
-    # test_buffer.seek(0)
-    
     if not minio_client.bucket_exists(bucket_name):
         minio_client.make_bucket(bucket_name)
         logger.info(msg=f"{bucket_name} does not exist hence was created")
@@ -132,16 +129,7 @@ def upload_to_minio(minio_client, bucket_name,
                                 metadata=obj.metadata
                                 )
         logger.info(msg=f"{obj.object_name} successfully uploaded to {obj.bucket_name if obj.bucket_name else bucket_name}")
-        
-        
-    # minio_client.put_object(bucket_name=bucket_name,
-    #                         object_name=test_file_name,
-    #                         data=test_buffer,
-    #                         length=test_buffer.getbuffer().nbytes,
-    #                         metadata=metadata
-    #                         )
-    # logger.info(msg=f"{test_file_name} successfully uploaded to {bucket_name}")
-    
+
     
 def main():
     args = parse_arguments()
