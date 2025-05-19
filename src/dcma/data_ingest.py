@@ -8,12 +8,21 @@ import io
 import os
 from datetime import datetime
 import json
+from dataclasses import dataclass
+from typing import Union, List
 
 logging.basicConfig(level=logging.DEBUG, 
                     format="%(asctime)s - %(levelname)s - %(message)s"
                     )
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class ObjectToPersistData:
+        upload_object: io.BytesIO
+        object_name: str
+        metadata: dict
+        bucket_name: Union[str,None] = None
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run Data ingestion pipeline")
@@ -76,9 +85,9 @@ def save_data_to_localdir(train_df, test_df, metadata,
     logger.info(msg=f"Successfuly saved metadata locally at {metadata_filepath}")
 
 
-def upload_to_minio(train_df, test_df, metadata, minio_client, bucket_name,
-                    train_file_name, test_file_name
-                    ):
+def create_upload_object(train_df, test_df, metadata,
+                        train_file_name, test_file_name,
+                        ):
     train_buffer = io.BytesIO()
     test_buffer = io.BytesIO()
     train_df.to_csv(train_buffer, index=False)
@@ -86,23 +95,52 @@ def upload_to_minio(train_df, test_df, metadata, minio_client, bucket_name,
     train_buffer.seek(0)
     test_buffer.seek(0)
     
+    reslist = []
+    reslist.append(ObjectToPersistData(upload_object=train_buffer, 
+                        object_name=train_file_name,
+                        metadata=metadata
+                        )
+                   )
+    reslist.append(ObjectToPersistData(upload_object=test_buffer, 
+                                        object_name=test_file_name,
+                                        metadata=metadata
+                                        )
+                   )
+    return reslist
+    
+    
+def upload_to_minio(minio_client, bucket_name, 
+                    objects_to_upload: List[ObjectToPersistData],
+                    **kwargs
+                    ):
+    # train_buffer = io.BytesIO()
+    # test_buffer = io.BytesIO()
+    # train_df.to_csv(train_buffer, index=False)
+    # test_df.to_csv(test_buffer, index=False)
+    # train_buffer.seek(0)
+    # test_buffer.seek(0)
+    
     if not minio_client.bucket_exists(bucket_name):
         minio_client.make_bucket(bucket_name)
         logger.info(msg=f"{bucket_name} does not exist hence was created")
         
-    minio_client.put_object(bucket_name=bucket_name, object_name=train_file_name,
-                            data=train_buffer, 
-                            length=train_buffer.getbuffer().nbytes,
-                            metadata=metadata
-                            )
-    logger.info(msg=f"{train_file_name} successfully uploaded to {bucket_name}")
-    minio_client.put_object(bucket_name=bucket_name,
-                            object_name=test_file_name,
-                            data=test_buffer,
-                            length=test_buffer.getbuffer().nbytes,
-                            metadata=metadata
-                            )
-    logger.info(msg=f"{test_file_name} successfully uploaded to {bucket_name}")
+    for obj in objects_to_upload:
+        minio_client.put_object(bucket_name=obj.bucket_name if obj.bucket_name else bucket_name, 
+                                object_name=obj.object_name,
+                                data=obj.upload_object, 
+                                length=obj.upload_object.getbuffer().nbytes,
+                                metadata=obj.metadata
+                                )
+        logger.info(msg=f"{obj.object_name} successfully uploaded to {obj.bucket_name if obj.bucket_name else bucket_name}")
+        
+        
+    # minio_client.put_object(bucket_name=bucket_name,
+    #                         object_name=test_file_name,
+    #                         data=test_buffer,
+    #                         length=test_buffer.getbuffer().nbytes,
+    #                         metadata=metadata
+    #                         )
+    # logger.info(msg=f"{test_file_name} successfully uploaded to {bucket_name}")
     
     
 def main():
@@ -154,11 +192,16 @@ def main():
                               )
     
     elif args.store_data_in_minio:
-        upload_to_minio(train_df=train_df, train_file_name=train_file_name,
-                        test_df=test_df, test_file_name=test_file_name,
+        objects_to_upload = create_upload_object(train_df=train_df, train_file_name=train_file_name,
+                                                test_df=test_df, test_file_name=test_file_name,
+                                                metadata=metadata
+                                                )
+        upload_to_minio(objects_to_upload=objects_to_upload,
                         metadata=metadata, bucket_name=args.bucket_name,
                         minio_client=minio_client
                         )
     
 if __name__ == "__main__":
     main()
+    
+    
