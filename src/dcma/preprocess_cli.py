@@ -10,8 +10,19 @@ from transform import (create_binary_conversion_variable,
 import uuid
 import io
 import numpy as np
-from data_ingest import get_minio_client, upload_to_minio, ObjectToPersistData
+from data_ingest import (get_minio_client, upload_to_minio, ObjectToPersistData,
+                         get_bucket_records, download_from_minio,
+                         get_expected_params_for_func
+                         )
 import copy
+import os
+import json
+import logging
+
+logging.basicConfig(level=logging.DEBUG, 
+                    format="%(asctime)s - %(levelname)s - %(message)s"
+                    )
+logger = logging.getLogger(__name__)
 
 
 def parse_arguments():
@@ -47,19 +58,32 @@ def parse_arguments():
                         type=str,
                         default="save_dir"
                         )
-    parser.add_argument("--data_path",
+    parser.add_argument("--local_metadata_store", type=str)
+    parser.add_argument("local_preprocess_store", type=str)
+    parser.add_argument("--local_feature_encoder_store", type=str)
+    parser.add_argument("--train_data_path",
                         type=str
                         )
     parser.add_argument("--test_data_path",
                         type=str
                         )
     parser.add_argument("--read_data_from_minio",
-                        type=bool
+                        action="store_true",
+                        help="Flag to read data from MinIO"
                         )
-    parser.add_argument("--save_bucket", type=str)
+    #parser.add_argument("--save_bucket", type=str)
+    parser.add_argument("--download_bucket_name", type=str)
     parser.add_argument("--dataset_uid")
-    parser.add_argument("--feature_encoder_bucket_name")
-    parser.add_argument("--preprocess_bucket_name")
+    parser.add_argument("--upload_output_to_minio", action="store_true")
+    parser.add_argument("--feature_encoder_bucket_name", type=str)
+    parser.add_argument("--preprocess_bucket_name", type=str)
+    parser.add_argument("--access_key_env_name", default="MINIO_ACCESS_KEY", help="Env var name for MinIO access key")
+    parser.add_argument("--access_secret_env_name", default="MINIO_SECRET_KEY", help="Env var name for MinIO secret key")
+    parser.add_argument("--minio_server_url_env_name", default="MINIO_SERVER_URL", help="Env var name for MinIO server URL")
+    parser.add_argument("--minio_endpoint_is_secured", action="store_true",
+                        help="Whether the Minio endpoint url is secured"
+                        )
+    
     return parser.parse_args()
     
 
@@ -67,10 +91,32 @@ def main():
     args = parse_arguments()
     
     preprocess_dataset_uuid = uuid.uuid4()
-    
+    encoder_uuid = uuid.uuid4()
+    if args.read_data_from_minio or args.upload_output_to_minio:
+        minio_client = get_minio_client(args=args)
+        
     if args.read_data_from_minio:
-        train_df = read_minio_data(data_path=args.data_path)
-        test_df = read_minio_data(data_path=args.test_data_path)
+        
+        bucket_records = get_bucket_records(bucket_name=args.download_bucket_name,
+                                            minio_client=minio_client
+                                            )
+        train_obj_name = [bc.object_name for bc in bucket_records if (bc.metadata["uid"] == args.dataset_uid) 
+                            and (bc.metadata["split_type"] == "train")
+                        ]
+        test_obj_name = [bc.object_name for bc in bucket_records if (bc.metadata["uid"] == args.dataset_uid) 
+                            and (bc.metadata["split_type"] == "test")
+                        ]
+        #train_df = read_minio_data(data_path=args.data_path)
+        #test_df = read_minio_data(data_path=args.test_data_path)
+        
+        train_df = download_from_minio(minio_client=minio_client, 
+                                        bucket_name=args.download_bucket_name, 
+                                        object_name=train_obj_name[0]
+                                        )
+        test_df = download_from_minio(minio_client=minio_client, 
+                                        bucket_name=args.download_bucket_name, 
+                                        object_name=test_obj_name[0]
+                                        )
     else:
         train_df = pd.read_csv(args.data_path)
         test_df = pd.read_csv(args.test_data_path)
@@ -84,69 +130,33 @@ def main():
     test_df = compute_cpc(data=test_df)
     
     
-    categorical_features = ['category_id', 'market_id',
-                            'customer_id', 'publisher',
-                            ]
-    numeric_features = ["CPC"]
-    features_to_embed = "industry"
+    # categorical_features = ['category_id', 'market_id',
+    #                         'customer_id', 'publisher',
+    #                         ]
+    # numeric_features = ["CPC"]
+    # features_to_embed = "industry"
     preprocess_pipeline = PreprocessPipeline(data=train_df, 
-                                             categorical_features=categorical_features,
-                                            numeric_features=numeric_features,
-                                            target_variable="convert",
-                                            features_to_embed=features_to_embed
+                                             categorical_features=args.categorical_features,
+                                            numeric_features=args.numeric_features,
+                                            target_variable=args.target_variable,
+                                            features_to_embed=args.features_to_embed
                                             )
     print("############  preprocessing  ###########")
-    preprocessed_train_datastore = preprocess_pipeline.run_preprocess_pipeline(categorical_target="convert",
-                                                                               encoder_type="frequency_encoding",
+    preprocessed_train_datastore = preprocess_pipeline.run_preprocess_pipeline(categorical_target=args.categorical_target, #"convert",
+                                                                               encoder_type=args.encoder_type, #"frequency_encoding",
                                                                                save_dir="metadata_store",
-                                                                               stats_to_compute="count"
+                                                                               stats_to_compute=args.stats_to_compute
                                                                               )
-    # preprocessed_train_target_convert = preprocessed_train_datastore.target
-    # preprocessed_train_predictors_convert = preprocessed_train_datastore.predictors
-    # preprocessed_train_predictor_colnames_inorder = preprocessed_train_datastore.predictor_colnames_inorder
+    
     sample_weight = preprocess_pipeline.sample_weight
-    encoder_uuid = uuid.uuid4()
-    feature_encoded_metadata = {"categorical_target": "convert",
-                                "encoder_type": "frequency_encoding",
-                                "stats_to_compute": "count",
-                                "uid": str(encoder_uuid),
-                                "parent_uid": str(args.dataset_uuid)
-                                }
-    ### prepare encode features for upload
-    artifacts_list = []
-    feat_store = preprocess_pipeline.feat_encoder_store
-    encode_features = [(f"{catvar}_{preprocess_dataset_uuid}.csv", getattr(feat_store, catvar))  
-                       for catvar in 
-                       preprocess_pipeline.categorical_features
-                       ]
-    feat_buffer = io.BytesIO()
-    for feat_filename,  feat in encode_features:
-        feat.to_csv(feat_buffer, index=False)
-        feat_buffer.seek(0)
-        artifacts_list.append(ObjectToPersistData(upload_object=feat_buffer,
-                                                    object_name=feat_filename,
-                                                    metadata=feature_encoded_metadata,
-                                                    bucket_name=args.feature_encoder_bucket_name
-                                                    )
-                                      )
-    
-    
-    #X_train_encoded_embedded_data = preprocess_pipeline.encoded_embedded_data
     train_preprocessed_data = preprocessed_train_datastore.full_data
     train_preprocessed_columns_inorder = preprocessed_train_datastore.full_data_columns_in_order
-    
-    preprocessed_train_buffer = io.BytesIO()
-    np.savez_compressed(file=preprocessed_train_buffer, 
-                        preprocessed_data=train_preprocessed_data
-                        )
-    preprocessed_train_buffer.seek(0)
     preprocessed_train_filename = f"train_{preprocess_dataset_uuid}.npz"
-    
     train_preprocessed_metadata = {"split_type": "train",
-                                    "categorical_features": categorical_features,
-                                    "numeric_features": numeric_features,
-                                    "target_variable": "convert",
-                                    "features_to_embed": features_to_embed,
+                                    "categorical_features": args.categorical_features,
+                                    "numeric_features": args.numeric_features,
+                                    "target_variable": args.target_variable,
+                                    "features_to_embed": args.features_to_embed,
                                     "encoder_uid": str(encoder_uuid),
                                     "parent_uid": args.dataset_uuid,
                                     "uid": preprocess_dataset_uuid,
@@ -154,23 +164,25 @@ def main():
                                     "file_name": preprocessed_train_filename,
                                     "sample_weight": str(sample_weight.tolist())
                                     }
-    artifacts_list.append(ObjectToPersistData(upload_object=preprocessed_train_buffer,
-                                                object_name=preprocessed_train_filename,
-                                                metadata=train_preprocessed_metadata,
-                                                bucket_name=args.preprocess_bucket_name
-                                                )
-                          )
+    train_preprocessed_metadata_file = f"train_preprocessed_metadata_{preprocess_dataset_uuid}.json"
     
-    ### use the encoders created for train dataset to encode test dataset 
-    # and prepare it for model evaluation. This prevents data leakage and 
-    # ensures model evaluation reflect model performance in terms of the encoding 
-    # used during training
-    # X_test_convert_encoded = preprocess_pipeline.encode_features(data=test_df,
-    #                                                              stats_to_compute="count"
-    #                                                              ) 
-    # X_test_convert_encoded_embed = preprocess_pipeline.transform_columns_to_embed(data=X_test_convert_encoded)
+    ### prepare encode features for upload
+    artifacts_list = []
+    feat_store = preprocess_pipeline.feat_encoder_store
+    encode_features = [(f"{catvar}_{preprocess_dataset_uuid}.csv", getattr(feat_store, catvar))  
+                       for catvar in 
+                       preprocess_pipeline.categorical_features
+                       ]
     
-    
+    feature_encoded_metadata = {"categorical_target": args.categorical_target, #"convert",
+                                "encoder_type": args.encoder_type, #"frequency_encoding",
+                                "stats_to_compute": args.stats_to_compute, #"count",
+                                "uid": str(encoder_uuid),
+                                "parent_uid": str(args.dataset_uuid)
+                                }
+    feature_encoded_metadata_filepath = os.path.join(f"{args.local_feature_encoder_store}", 
+                                                     f"feature_encoded_metadata_{encoder_uuid}.json"
+                                                     )
     preprocessed_test_datastore = preprocess_pipeline.run_preprocess_pipeline(categorical_target="convert",
                                                                                 encoder_type="frequency_encoding",
                                                                                 save_dir="metadata_store",
@@ -179,28 +191,81 @@ def main():
                                                                                 )
     test_preprocessed_data = preprocessed_test_datastore.full_data
     test_preprocessed_columns_inorder = preprocessed_test_datastore.full_data_columns_in_order
-    
-    preprocessed_test_buffer = io.BytesIO()
-    np.savez_compressed(file=preprocessed_test_buffer, 
-                        preprocessed_data=test_preprocessed_data
-                        )
-    preprocessed_test_buffer.seek(0)
-    preprocessed_test_filename = f"test_{preprocess_dataset_uuid}.npz"
-    
-    
     test_preprocessed_metadata = copy.deepcopy(train_preprocessed_metadata)
+    preprocessed_test_filename = f"test_{preprocess_dataset_uuid}.npz"
     test_preprocessed_metadata["split_type"] = "test"
     test_preprocessed_metadata["file_name"] = preprocessed_test_filename
     test_preprocessed_metadata["column_order"] = test_preprocessed_columns_inorder
+    test_preprocessed_metadata_file = f"test_preprocessed_metadata_{preprocess_dataset_uuid}.json"
     
-    artifacts_list.append(ObjectToPersistData(upload_object=preprocessed_test_buffer,
-                                              object_name=preprocessed_test_filename,
-                                              metadata=test_preprocessed_metadata,
-                                              bucket_name=args.preprocess_bucket_name
-                                              )
-                          )
-    minio_client = get_minio_client(args=args)
-    upload_to_minio(minio_client=minio_client, objects_to_upload=artifacts_list,
-                    bucket_name=None
-                    )
+    if not args.upload_output_to_minio:
+        np.savez_compressed(file=os.path.join(f"{args.local_preprocess_store}", {preprocessed_train_filename}), 
+                            preprocessed_data=train_preprocessed_data
+                            )
+        np.savez_compressed(file=os.path.join(f"{args.local_preprocess_store}", preprocessed_test_filename), 
+                            preprocessed_data=test_preprocessed_data
+                            )
+        train_preprocessed_metadata_filepath = os.path.join(f"{args.local_metadata_store}", 
+                                                            train_preprocessed_metadata_file
+                                                            )
+        test_preprocessed_metadata_filepath = os.path.join(f"{args.local_metadata_store}",
+                                                            test_preprocessed_metadata_file
+                                                            )
+        for feat_filename, feat in encode_features:
+            feat.to_csv(os.path.join(f"{args.local_feature_encoder_store}", feat_filename), index=False)
+        
+        
+        with open(train_preprocessed_metadata_filepath, "w") as fp:
+            json.dump(train_preprocessed_metadata, fp)
+        
+        with open(test_preprocessed_metadata_filepath, "w") as fp:
+            json.dump(test_preprocessed_metadata, fp)
+            
+        with open(feature_encoded_metadata_filepath, "w") as fp:
+            json.dump(feature_encoded_metadata, fp)
     
+    if args.upload_output_to_minio:
+        feat_buffer = io.BytesIO()
+        for feat_filename,  feat in encode_features:
+            feat.to_csv(feat_buffer, index=False)
+            feat_buffer.seek(0)
+            artifacts_list.append(ObjectToPersistData(upload_object=feat_buffer,
+                                                        object_name=feat_filename,
+                                                        metadata=feature_encoded_metadata,
+                                                        bucket_name=args.feature_encoder_bucket_name
+                                                        )
+                                        )
+        
+        preprocessed_train_buffer = io.BytesIO()
+        np.savez_compressed(file=preprocessed_train_buffer, 
+                            preprocessed_data=train_preprocessed_data
+                            )
+        preprocessed_train_buffer.seek(0)
+        
+        artifacts_list.append(ObjectToPersistData(upload_object=preprocessed_train_buffer,
+                                                    object_name=preprocessed_train_filename,
+                                                    metadata=train_preprocessed_metadata,
+                                                    bucket_name=args.preprocess_bucket_name
+                                                    )
+                            )
+        
+        preprocessed_test_buffer = io.BytesIO()
+        np.savez_compressed(file=preprocessed_test_buffer, 
+                            preprocessed_data=test_preprocessed_data
+                            )
+        preprocessed_test_buffer.seek(0)
+        
+        artifacts_list.append(ObjectToPersistData(upload_object=preprocessed_test_buffer,
+                                                object_name=preprocessed_test_filename,
+                                                metadata=test_preprocessed_metadata,
+                                                bucket_name=args.preprocess_bucket_name
+                                                )
+                            )
+        upload_to_minio(minio_client=minio_client, objects_to_upload=artifacts_list,
+                        bucket_name=None
+                        )
+        
+
+
+if __name__ == "__main__":
+    main()
