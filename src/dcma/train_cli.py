@@ -18,11 +18,13 @@ logging.basicConfig(level=logging.INFO,
 
 logger = logging.getLogger(__name__)
 
-def main():
+def parse_argumments():
     parser = argparse.ArgumentParser(description="Run Model training")
-    parser.add_argument("--model_registry", type=str, required=True)
-    parser.add_argument("--read_data_from_minio",
-                        type=bool
+    parser.add_argument("--model_registry", type=str, default="mlflow",
+                        help="Model registry to use. Currently only mlflow is supported"
+                        )
+    parser.add_argument("--read_data_from_minio", action="store_true",
+                        help="Whether to read data from MinIO"
                         )
     parser.add_argument("--model_type", required=True, type=str)
     parser.add_argument("--scoring", required=True, nargs="+")
@@ -41,9 +43,21 @@ def main():
     parser.add_argument("--minio_endpoint_is_secured", action="store_true",
                         help="Whether the Minio endpoint url is secured"
                         )
+    parser.add_argument("--local_train_data_path", type=str)
+    parser.add_argument("--local_test_data_path", type=str)
+    parser.add_argument("--train_preprocessed_metadata_filepath", type=str)
+    parser.add_argument("--include_sample_weight", action="store_true",
+                        help="Whether to include sample weight in the training"
+                        )
     
     
-    args = parser.parse_args()
+    return parser.parse_args()
+    
+
+def main():
+    args = parse_argumments()
+    logger.info(f"Arguments: {args}")
+    
     if args.read_data_from_minio or args.upload_output_to_minio:
         minio_client = get_minio_client(args=args)
     if args.read_data_from_minio:
@@ -77,8 +91,8 @@ def main():
                                         dytpe="npz"
                                         )
     elif not args.read_data_from_minio:
-        train_data = np.load(args.train_data_path)
-        test_data = np.load(args.test_data_path)
+        train_data = np.load(args.local_train_data_path)
+        test_data = np.load(args.local_test_data_path)
         
         with open(args.train_preprocessed_metadata_filepath, "rb") as f:
             train_preprocessed_metadata = json.load(f)
@@ -106,19 +120,23 @@ def main():
                             model_type=args.model_type,
                             #model_registry=args.model_registry,
                             )
-    trainer.run_model_training_pipeline(cv=20, scoring=['accuracy', "precision", "recall", "f1"],
-                                        model_result_metrics=['test_accuracy',  'train_accuracy',
-                                                              'test_precision', 'train_precision',
-                                                              'test_recall', 'train_recall',
-                                                              'test_f1', 'train_f1'
-                                                              ],
-                                        evaluation_metric="accuracy_score",
-                                        save_model_as="conversion_proba.model",
+    trainer.run_model_training_pipeline(cv=20, 
+                                        scoring=args.scoring, #['accuracy', "precision", "recall", "f1"],
+                                        model_result_metrics=args.model_result_metrics,
+                                        
+                                        # ['test_accuracy',  'train_accuracy',
+                                        #                       'test_precision', 'train_precision',
+                                        #                       'test_recall', 'train_recall',
+                                        #                       'test_f1', 'train_f1'
+                                        #                       ],
+                                        evaluation_metric=args.evaluation_metric, #"accuracy_score",
+                                        save_model_as=args.save_model_as, #"conversion_proba.model",
                                         save_dir="model_store"
                                         )
     
 
-
+if __name__ == "__main__":
+    main()
 
 
 
