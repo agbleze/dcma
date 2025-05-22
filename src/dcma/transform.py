@@ -140,7 +140,7 @@ def prepare_data(data: pd.DataFrame,
     else:
         target_data = data[target].values
     
-        combined_data = np.hstack([target_data, all_predictors])
+        combined_data = np.hstack([target_data.reshape(-1,1), all_predictors])
         combined_columns = [target] + predictor_colnames_in_order
     
     return {"target": target_data,

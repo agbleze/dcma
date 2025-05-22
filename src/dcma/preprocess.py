@@ -287,10 +287,11 @@ class PreprocessPipeline(object):
             _passed_create_encoder_records_params = {k:v for k, v in kwargs.items() 
                                                      if k in _kwarg_create_encoder_records.keys()
                                                      }
-            self.feat_encoder_store = self.create_encoder_records(encoder_type=encoder_type,
-                                                                  stats_to_compute=self.stats_to_compute,
-                                                                  **_passed_create_encoder_records_params
-                                                                  )
+            #self.feat_encoder_store = 
+            self.create_encoder_records(encoder_type=encoder_type,
+                                        stats_to_compute=self.stats_to_compute,
+                                        **_passed_create_encoder_records_params
+                                        )
             
             _kwarg_export_encoder_records = inspect.signature(self.export_encoder_records).parameters
             _passed_export_encoder_records_params = {k:v for k, v in kwargs.items() 
@@ -299,20 +300,20 @@ class PreprocessPipeline(object):
             self.export_encoder_records(**_passed_export_encoder_records_params)
         else:
             print(f"Using already exising feat_encoder_store for encoding")
-            if not encoder_values_colname:
-                encoder_values_colname = self.encoder_values_colname
-            encoded_categorical_var = []
-            for catvar in self.categorical_features:
-                encoded_colname = f'{catvar}_encoded'
-                catvar_encode_record = getattr(self.feat_encoder_store, catvar)
-                self.data = encode(data=data, colname_to_encode=catvar,
-                                    save_encoded_column_as=encoded_colname,
-                                    encoder_data=catvar_encode_record,
-                                    encoder_colname=catvar,
-                                    encoder_values_colname=encoder_values_colname,
-                                    )
-                encoded_categorical_var.append(encoded_colname)
-            self.predictors.extend(encoded_categorical_var)
+        if not encoder_values_colname:
+            encoder_values_colname = self.encoder_values_colname
+        encoded_categorical_var = []
+        for catvar in self.categorical_features:
+            encoded_colname = f'{catvar}_encoded'
+            catvar_encode_record = getattr(self.feat_encoder_store, catvar)
+            self.data = encode(data=data, colname_to_encode=catvar,
+                                save_encoded_column_as=encoded_colname,
+                                encoder_data=catvar_encode_record,
+                                encoder_colname=catvar,
+                                encoder_values_colname=encoder_values_colname,
+                                )
+            encoded_categorical_var.append(encoded_colname)
+        self.predictors.extend(encoded_categorical_var)
         if not isinstance(self.numeric_features, list):
             self.predictors.append(self.numeric_features)
         else:
@@ -392,8 +393,9 @@ class PreprocessPipeline(object):
                                         if k in _kwarg_encode_features.keys()
                                         }
         self.encoded_data = self.encode_features(encoder_type=encoder_type,
+                                                 save_dir=save_dir,
                                                  stats_to_compute=stats_to_compute, 
-                                                 **_passed_encode_features_params
+                                                 **kwargs #**_passed_encode_features_params
                                                  )   
         self.encoded_embedded_data = self.transform_columns_to_embed(data=self.encoded_data) 
         if not predictors:

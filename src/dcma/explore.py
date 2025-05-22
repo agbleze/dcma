@@ -191,3 +191,121 @@ bucket = client.list_buckets()[0]
 # %%
 bucket
 # %%
+objs = client.list_objects(bucket_name="rawdata", recursive=True, 
+                           include_user_meta=True, include_version=True,
+                           fetch_owner=True
+                           )
+# %%
+objnms = [i.metadata for i in objs]
+for i in objs:
+    print(i.metadata)
+# %%
+client.stat_object(bucket_name="rawdata", 
+                   object_name="test_1797afda-997d-4761-a78a-6d7ee0a78bb7.csv"
+                   )
+# %%
+list(objs)
+# %%
+objnms
+# %%
+from data_ingest import (get_bucket_records, download_from_minio, 
+                         get_minio_client,
+                         get_expected_params_for_func
+                         )
+
+# %%
+#get_minio_client()
+bucket_records = get_bucket_records(minio_client=client, bucket_name="rawdata")
+# %%
+bucket_records[0].metadata
+
+#%%
+
+df = download_from_minio(minio_client=client, bucket_name="rawdata",
+                    object_name=bucket_records[0].object_name
+                    )
+                    
+
+
+# %%
+df
+# %%
+[bc.object_name for bc in bucket_records if bc.metadata["uid"]== "1797afda-997d-4761-a78a-6d7ee0a78bb7"]
+
+# %%
+bucket_records[0].metadata["uid"]
+# %%
+
+prep_bucket_records = get_bucket_records(minio_client=client, 
+                                      bucket_name="conversion-preprocess-storage"
+                                      )
+
+obj_nms = [bc.object_name for bc in prep_bucket_records if bc.metadata["uid"]== "65e46944-01bc-4e72-826d-258f04032275"]
+# %%
+test_prep_df = download_from_minio(minio_client=client,
+                              bucket_name="conversion-preprocess-storage",
+                              object_name=obj_nms[0], dytpe="npz"
+                              )
+
+train_prep_df = download_from_minio(minio_client=client,
+                              bucket_name="conversion-preprocess-storage",
+                              object_name=obj_nms[1], dytpe="npz"
+                              )
+# %%
+train_prep = train_prep_df.get("preprocessed_data")
+# %%
+y_train = train_prep[:, 0]
+
+#%%
+
+for i in y_train:
+    print(int(i))
+# %%
+X_train = train_prep[:, 1:]
+
+# %%
+X_train.shape
+# %%
+
+column_order = [bc.metadata.get("column_order") for bc in prep_bucket_records if bc.metadata["uid"]== "65e46944-01bc-4e72-826d-258f04032275"]
+# %%
+list(column_order[0])
+# %%
+import re, ast
+
+
+ast.literal_eval(column_order[0].split("[")[0])
+# %%
+import re, ast
+
+def parse_and_flatten(s: str) -> list:
+    """
+    Splits a comma-separated string on commas that lie outside square brackets,
+    and then parses and flattens any token that is a list literal.
+    
+    For example, given:
+      "convert,category_id_encoded,market_id_encoded,customer_id_encoded,publisher_encoded,CPC,['industry_embedding']"
+    it returns:
+      ['convert', 'category_id_encoded', 'market_id_encoded', 'customer_id_encoded', 'publisher_encoded', 'CPC', 'industry_embedding']
+    """
+    tokens = [t.strip() for t in re.split(r',(?=(?:[^[]*\[[^]]*])*[^]]*$)', s)]
+    return sum(
+        [ast.literal_eval(token) if token.startswith('[') and token.endswith(']') else [token]
+         for token in tokens],
+        []
+    )
+
+# Example usage:
+input_str = "convert,category_id_encoded,market_id_encoded,customer_id_encoded,publisher_encoded,CPC,['industry_embedding']"
+output = parse_and_flatten(input_str)
+print(output)
+
+# %%
+import numpy as np
+# %%
+def func(name):
+    B = name
+    
+print(func("b"))
+
+# %%

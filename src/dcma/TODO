@@ -14,168 +14,302 @@ data ingestion with splits >> Preprocessing with derieved vars >>
 
 
 
-
-#!/usr/bin/env python3
-import argparse
-import io
-import json
-import logging
-import os
-import uuid
-from datetime import datetime
-
-import pandas as pd
-from minio import Minio
-from sklearn.model_selection import train_test_split
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Run Data Ingestion Pipeline")
-    parser.add_argument("--test_size", type=float, default=0.2, help="Proportion of the dataset to be used as test set")
-    parser.add_argument("--random_state", type=int, default=2025, help="Random state for reproducing the split")
-    parser.add_argument("--stratify_variable", default=None, help="Column name to use for stratification")
-    parser.add_argument("--data_filepath", required=True, help="Path to the CSV data file")
-    parser.add_argument("--shuffle", action="store_true", default=True, help="Whether to shuffle the dataset before splitting")
-    parser.add_argument("--store_data_in_minio", action="store_true", help="Flag to store data in MinIO instead of locally")
-    parser.add_argument("--bucket_name", default="datasets", help="MinIO bucket to use (required if storing data in MinIO)")
-    # Environment variable names should be provided if using MinIO storage
-    parser.add_argument("--access_key_env_name", default="MINIO_ACCESS_KEY", help="Env var name for MinIO access key")
-    parser.add_argument("--access_secret_env_name", default="MINIO_SECRET_KEY", help="Env var name for MinIO secret key")
-    parser.add_argument("--minio_server_url_env_name", default="MINIO_SERVER_URL", help="Env var name for MinIO server URL")
-    parser.add_argument("--data_store_dir", default="metadata_store", help="Local directory to store data and metadata")
-    return parser.parse_args()
-
-def get_minio_client(args):
-    # Retrieve and validate environment variables for MinIO credentials.
-    access_key = os.getenv(args.access_key_env_name)
-    secret_key = os.getenv(args.access_secret_env_name)
-    minio_url = os.getenv(args.minio_server_url_env_name)
+I want incorporate Mlflow into my ModelTrainer or what do you suggest and how to go about it. It will be part of my pipeline, to help implement my architecture i share earlier. should it be part of the modeltrainer or it has to be outside somewhere, maybe as a separate module or docker container. i want to incoporate it in such a way that it is scalable and follows industry standard in by kubeflow. take a look at the ModelTrainer and how it was used:                            
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
     
-    if not all([access_key, secret_key, minio_url]):
-        logger.error("Missing one or more required MinIO environment variables: %s, %s, %s",
-                     args.access_key_env_name, args.access_secret_env_name, args.minio_server_url_env_name)
-        raise ValueError("MinIO configuration incomplete.")
-    
-    client = Minio(
-        endpoint=minio_url,
-        access_key=access_key,
-        secret_key=secret_key,
-        secure=False  # Consider parameterizing SSL settings if needed
-    )
-    return client
+class ModelTrainer(object):
+    all_model_types = []
+    algo_family = [ensemble, linear_model, neighbors]
+    num_algo_family = len(algo_family)
+    for algo in algo_family:
+        # methods = [method for method in dir(algo) if callable(getattr(algo, method)) and not method.startswith("__") and hasattr(getattr(algo, method), "fit")
+        #             ]
+        for method in dir(algo):
+            if callable(getattr(algo, method)) and not method.startswith("__") and hasattr(getattr(algo, method), "fit"):
+            
+                all_model_types.append(method)
+        
+    def __init__(self, training_predictors, training_target,
+                  testing_predictors, testing_target,
+                  sample_weight, model_type: str
+                  ):
+         self.training_predictors = training_predictors
+         self.training_target = training_target
+         self.testing_predictors = testing_predictors
+         self.testing_target = testing_target
+         self.sample_weight = sample_weight
+         
+         if model_type not in self.__class__.all_model_types:
+             raise ValueError(f"{model_type} is not a valid sklearn model class name ")
+         
+         self.model_type = model_type
+         
+    def train_model(self, 
+                    cv: int = 5,
+                    scoring: Union[str, List]=['accuracy', "precision", "recall", "f1"],
+                    ):
+        include_sample_weight = False
+        for algo_index, algo in enumerate(self.__class__.algo_family):
+            #if (algo_index + 1) < self.__class__.num_algo_family:
+                try:
+                    model = getattr(algo, self.model_type)
+                    model_params_signature = inspect.signature(getattr(algo, self.model_type).fit).parameters
+                    if "sample_weight" in model_params_signature:
+                        include_sample_weight = True
+                    #algo_index = self.__class__.num_algo_family
+                    break
+                except Exception as e:
+                    if (algo_index + 1) < self.__class__.num_algo_family:
+                        continue
+                    else:
+                        raise ValueError(f"self.model_type not found in {self.algo_family}. Failed with error {e}")
+                
+          
+        # if self.model_type == "conversion_proba":
+        #     model = HistGradientBoostingClassifier(random_state=2025, 
+        #                                            class_weight="balanced"
+        #                                            ) 
+        if "random_state" in model_params_signature:
+            model = model(random_state=2025)
+        else:
+            model = model()
+        if cv == 1:
+            if include_sample_weight:
+                print(f"sample weight used: {include_sample_weight}")
+                model.fit(X=self.training_predictors, y=self.training_target, 
+                            sample_weight=self.sample_weight
+                            )
+            else:
+                print(f"sample weight used: {include_sample_weight}")
+                model.fit(X=self.training_predictors, y=self.training_target)
+        # elif self.model_type == "cpa_pred":
+        #     model = HistGradientBoostingRegressor(random_state=2025)
+        #     if cv == 1:
+        #         model.fit(X=self.training_predictors, y=self.training_target)
+        elif cv > 1:
+            if include_sample_weight:
+                params = {"sample_weight": self.sample_weight}
+            else:
+                params = None
+            print(f"sample weight used: {include_sample_weight}")
+            self.cv_results = cross_validate(estimator=model,
+                                            X=self.training_predictors,
+                                            y=self.training_target,
+                                            cv=cv, n_jobs=-1,
+                                            scoring=scoring,
+                                            return_train_score=True, 
+                                            return_estimator=True,
+                                            params=params
+                                            )
+        self.estimator = self.cv_results["estimator"][0]
+        return self.cv_results
 
-def save_locally(train_df, test_df, metadata, args, dataset_uuid):
-    # Ensure all files are saved under the data_store_dir.
-    os.makedirs(args.data_store_dir, exist_ok=True)
-    train_file_path = os.path.join(args.data_store_dir, f"train_{dataset_uuid}.csv")
-    test_file_path = os.path.join(args.data_store_dir, f"test_{dataset_uuid}.csv")
-    
-    train_df.to_csv(train_file_path, index=False)
-    test_df.to_csv(test_file_path, index=False)
-    logger.info("Saved train and test CSV files locally in %s", args.data_store_dir)
-    
-    metadata_filepath = os.path.join(args.data_store_dir, f"metadata_{dataset_uuid}.json")
-    with open(metadata_filepath, "w") as fp:
-        json.dump(metadata, fp)
-    logger.info("Successfully saved metadata locally at %s", metadata_filepath)
+    def show_model_results(self, model_result_metrics):
+        if not hasattr(self, "cv_results"):
+            print(f"cv_results not available ... Training model to get cv_results")
+            self.cv_results = self.train_model()
+        show_cross_validation_metrics(cv_result=self.cv_results,
+                                      metrics=model_result_metrics
+                                      )
+    def evaluate_model(self, evaluation_metric="root_mean_squared_error"):
+        valid_metrics = [method for method in dir(metrics) if 
+                         callable(getattr(metrics, method)) and 
+                         not method.startswith("__")
+                         ]
 
-def upload_to_minio(train_df, test_df, metadata, args, dataset_uuid):
-    # Prepare CSV data using in-memory buffers
-    train_buffer = io.BytesIO()
-    test_buffer = io.BytesIO()
-    train_df.to_csv(train_buffer, index=False)
-    test_df.to_csv(test_buffer, index=False)
+        if not hasattr(self, "estimator"):
+            print("Model has not been train hence estimator is not available ... Training model")
+            self.cv_results = self.train_model()
+            self.estimator = self.cv_results["estimator"][0]
+            
+        if evaluation_metric not in valid_metrics:
+            raise ValueError(f"{evaluation_metric} is not a valid metric in sklearn metrics")
+        metric_func = getattr(metrics, evaluation_metric, None)
+        self.test_prediction = self.estimator.predict(self.testing_predictors)
+        self.train_prediction = self.estimator.predict(self.training_predictors)
+        
+        self.test_score = metric_func(y_true=self.testing_target, y_pred=self.test_prediction) 
+        self.train_score = metric_func(y_true=self.training_target, y_pred=self.train_prediction) 
+        print(f'Model training {evaluation_metric} is: {round(self.train_score, 5)}')
+        print(f'Model testing {evaluation_metric} is: {round(self.test_score, 5)}')
+        
+    def save_model(self, save_model_as: str, save_dir: str = "model_store"):
+        if not hasattr(self, "estimator"):
+            raise ValueError(f"No trained model available. Model needs to be trained before it can be saved")
+        self.model_path = os.path.join(save_dir, save_model_as)
+        joblib.dump(self.estimator, self.model_path)
+        
+    def save_model_metrics(self, save_dir: str = "model_store", 
+                           save_model_metrics_as: Union[str, None] = None
+                           ):
+        if not hasattr(self, "cv_results"):
+            raise ValueError(f"No trained model metrics available. Model needs to be trained for metrics to be saved")
+        if not save_model_metrics_as:
+            if hasattr(self, "model_path"):
+                self.model_metrics_path = self.model_path.split(".")[0] + "_metrics.json"
+            else:
+                raise ValueError(f"Provide value for save_model_metrics_as since model_path is not known")
+        else:
+            self.model_metrics_path = os.path.join(save_dir, save_model_metrics_as)
+        self.cv_metrics = {k: v for k, v in self.cv_results.items() if k != "estimator"}
+        with open(self.model_metrics_path, "w") as file:
+            json.dump(self.cv_metrics, file, cls=NpEncoder)
+        print(f"successfully saved model metrics at {self.model_metrics_path}")
+        
+    def load_model(self, model_path: str):
+        if not model_path:
+            model_path = self.model_path
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"model_path does not exist or inaccessible. Ensure model is trained and persisted at that {model_path}")
+        model = joblib.load(model_path)
+        return model
     
-    # Reset the buffer pointers to the beginning for reading
-    train_buffer.seek(0)
-    test_buffer.seek(0)
-    
-    client = get_minio_client(args)
-    
-    # Ensure the bucket exists; create it if not.
-    if not client.bucket_exists(args.bucket_name):
-        client.make_bucket(args.bucket_name)
-        logger.info("Bucket '%s' did not exist and was created.", args.bucket_name)
-    
-    train_file_name = f"train_{dataset_uuid}.csv"
-    test_file_name = f"test_{dataset_uuid}.csv"
-    
-    client.put_object(
-        bucket_name=args.bucket_name,
-        object_name=train_file_name,
-        data=train_buffer,
-        length=train_buffer.getbuffer().nbytes,
-        metadata=metadata
-    )
-    logger.info("Uploaded '%s' to bucket '%s'.", train_file_name, args.bucket_name)
-    
-    client.put_object(
-        bucket_name=args.bucket_name,
-        object_name=test_file_name,
-        data=test_buffer,
-        length=test_buffer.getbuffer().nbytes,
-        metadata=metadata
-    )
-    logger.info("Uploaded '%s' to bucket '%s'.", test_file_name, args.bucket_name)
-
-def main():
-    args = parse_args()
-
-    # Generate a UUID to tag this dataset version.
-    dataset_uuid = str(uuid.uuid4())
-    
-    try:
-        data = pd.read_csv(args.data_filepath)
-        logger.info("Loaded data from %s with shape %s", args.data_filepath, data.shape)
-    except Exception as e:
-        logger.error("Error reading data file: %s", e)
-        raise
-
-    # Perform train-test split with optional stratification.
-    try:
-        train_df, test_df = train_test_split(
-            data,
-            test_size=args.test_size,
-            random_state=args.random_state,
-            stratify=data[args.stratify_variable] if args.stratify_variable else None,
-            shuffle=args.shuffle
-        )
-        logger.info("Completed train-test split. Train shape: %s, Test shape: %s", train_df.shape, test_df.shape)
-    except Exception as e:
-        logger.error("Error during train-test split: %s", e)
-        raise
-
-    # Create metadata with details for traceability.
-    creation_time = datetime.now()
-    metadata = {
-        "uid": dataset_uuid,
-        "random_state": str(args.random_state),
-        "test_size": str(args.test_size),
-        "stratify_variable": str(args.stratify_variable),
-        "shuffle": str(args.shuffle),
-        "data_used_filepath": args.data_filepath,
-        "creation_time": str(creation_time)
-    }
-
-    # Decide on storage destination based on the flag.
-    if args.store_data_in_minio:
-        try:
-            upload_to_minio(train_df, test_df, metadata, args, dataset_uuid)
-        except Exception as e:
-            logger.error("Error uploading data to MinIO: %s", e)
-            raise
-    else:
-        try:
-            save_locally(train_df, test_df, metadata, args, dataset_uuid)
-        except Exception as e:
-            logger.error("Error saving data locally: %s", e)
-            raise
-
+    def run_model_training_pipeline(self, cv, scoring, model_result_metrics,
+                                    save_model_as,
+                                    evaluation_metric="root_mean_squared_error",
+                                    save_dir: str = "model_store"
+                                    ):
+        self.train_model(cv=cv, scoring=scoring)
+        self.show_model_results(model_result_metrics=model_result_metrics)
+        self.evaluate_model(evaluation_metric=evaluation_metric)
+        self.save_model(save_model_as=save_model_as,
+                        save_dir=save_dir
+                        )
+        self.save_model_metrics()
+   
+    def tune_model_hyperparameter(self, hyperparameter_space: Dict,
+                                  n_iter: int,
+                                  cv: int, scoring: str
+                                  ):
+        if not hasattr(self, "estimator"):
+            raise ValueError(f"Model needs to be trained before tuning")
+        self.random_search = RandomizedSearchCV(estimator=self.estimator, 
+                                                param_distributions=hyperparameter_space,
+                                                n_iter=n_iter,
+                                                cv=cv,
+                                                refit=True,
+                                                return_train_score=True, 
+                                                n_jobs=-1,
+                                                random_state=2025,
+                                                scoring=scoring,
+                                                )  
+        self.random_search.fit(X=self.training_predictors, y=self.training_target)     
+        
+      
 if __name__ == "__main__":
-    main()
+    # read data
+    os.environ["TOKENIZERS_PARALLELISM"] = "False"
+    data_filepath = get_path(folder_name="", file_name="Data Science Challenge - ds_challenge_data.csv")
+    data = pd.read_csv(data_filepath)
+    # create target vars and predictors that are derieve from only other predictors
+    data = compute_cpa(data=data)
+    data = create_binary_conversion_variable(data)
+    data = compute_cpc(data=data)
+    
+    # split into train and test
+    target_convert_df = data["convert"]
+    predictor_convert_df = data
+    X_train_convert, X_test_convert, y_train_convert, y_test_convert = train_test_split(predictor_convert_df, 
+                                                                                        target_convert_df, 
+                                                                                        test_size=0.2, 
+                                                                                        random_state=2025,
+                                                                                        stratify=target_convert_df
+                                                                                        )
+    y_train_cpa = np.log1p(X_train_convert["CPA"].copy())
+    y_test_cpa = np.log1p(X_test_convert["CPA"].copy())
+    train_cpa = X_train_convert.copy()
+    test_cpa = X_test_convert.copy()
+    train_cpa["log_CPA"] = np.log1p(train_cpa["CPA"])
+    test_cpa["log_CPA"] = np.log1p(test_cpa["CPA"])
+   
+    X_train_convert.drop(columns=["CPA"], inplace=True)
+    X_test_convert.drop(columns=["CPA"], inplace=True)
+    
+    # prepare data for model
+    categorical_features = ['category_id', 'market_id',
+                            'customer_id', 'publisher',
+                            ]
+    numeric_features = ["CPC"]
+    features_to_embed = ["industry"]
+    preprocess_pipeline = PreprocessPipeline(data=X_train_convert, 
+                                             categorical_features=categorical_features,
+                                            numeric_features=numeric_features,
+                                            target_variable="convert",
+                                            features_to_embed="industry"
+                                            )
+    print("############  preprocessing  ###########")
+    ## skipped for reduced character  
+    #  train conversion proba
+    print("############# running model  ##########")
+    trainer = ModelTrainer(training_predictors=preprocessed_train_predictors_convert,
+                            training_target=preprocessed_train_target_convert,
+                            testing_predictors=preprocessed_test_predictors_convert,
+                            testing_target=preprocessed_test_target_convert,
+                            sample_weight=sample_weight,
+                            model_type="KNeighborsClassifier"
+                            )
+    trainer.run_model_training_pipeline(cv=20, scoring=['accuracy', "precision", "recall", "f1"],
+                                        model_result_metrics=['test_accuracy',  'train_accuracy',
+                                                              'test_precision', 'train_precision',
+                                                              'test_recall', 'train_recall',
+                                                              'test_f1', 'train_f1'
+                                                              ],
+                                        evaluation_metric="accuracy_score",
+                                        save_model_as="conversion_proba.model",
+                                        save_dir="model_store"
+                                        )
+
+    ##############   use conversion proba to augment data  #############
+    classifier = trainer.estimator
+    
+    colnames_to_encode = ["market_id", "category_id", "customer_id", "publisher"]
+    feat_encoder_dict = {col: getattr(preprocess_pipeline.feat_encoder_store, col) for col in categorical_features}
+    
+    train_cpa = transform_data_with_conversion(data=train_cpa, 
+                                               variable_encoder_map=feat_encoder_dict,
+                                                predictors=preprocess_pipeline.predictors,
+                                                classifier=classifier
+                                                )
+    test_cpa = transform_data_with_conversion(data=test_cpa, variable_encoder_map=feat_encoder_dict,
+                                                predictors=preprocess_pipeline.predictors,
+                                                classifier=classifier
+                                                )
+
+   
+    ############################################  CPA PREDITION    ##################################################
+    ###############      prepare data for cpa proba   ##################
+    ### use target encoding for cpa prediction using the median as of log_CPA for imputation of categorical var
+    cpa_preproc_pipeline = PreprocessPipeline(data=train_cpa, 
+                                                categorical_features=categorical_features,
+                                                numeric_features=["CPC", "proba_convert"],
+                                                target_variable="log_CPA",
+                                                features_to_embed="industry"
+                                                )
+    print("############   Preprocessing for CPA prediction ###########")
+    ## skipped to reduce chars    
+    print("############# TRAINING CPA model  ##########")
+    cpa_trainer = ModelTrainer(training_predictors=preproc_cpa_train_predictors,
+                                training_target=preproc_cpa_train_target,
+                                testing_predictors=preproc_cpa_test_predictors,
+                                testing_target=preproc_cpa_test_target,
+                                sample_weight=None,
+                                model_type="KNeighborsRegressor"
+                                )
+    cpa_trainer.run_model_training_pipeline(cv=20, scoring=['neg_root_mean_squared_error'],
+                                            model_result_metrics=['test_neg_root_mean_squared_error','train_neg_root_mean_squared_error'],
+                                            evaluation_metric="root_mean_squared_error",
+                                            save_model_as="cpa_regressor.model",
+                                            save_dir="model_store"
+                                            )
+    cpa_regressor = cpa_trainer.estimator
+    
+    test_log_cpa_pred = cpa_regressor.predict(preproc_cpa_test_predictors).tolist()
+    train_log_cpa_pred = cpa_regressor.predict(preproc_cpa_train_predictors).tolist()

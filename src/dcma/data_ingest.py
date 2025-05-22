@@ -9,7 +9,11 @@ import os
 from datetime import datetime
 import json
 from dataclasses import dataclass
-from typing import Union, List
+from typing import Union, List, Literal
+from minio.error import S3Error
+import inspect
+import copy
+import numpy as np
 
 logging.basicConfig(level=logging.DEBUG, 
                     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -46,14 +50,15 @@ def parse_arguments():
                         help="Local directory to store data and metadata"
                         )
     parser.add_argument("--minio_endpoint_is_secured", action="store_true",
-                        help="Whether the Minio endpoint url is secured")
+                        help="Whether the Minio endpoint url is secured"
+                        )
     return parser.parse_args()
 
 def get_minio_client(args)->Minio:
     ACCESS_KEY = os.getenv(key=args.access_key_env_name)
     ACCESS_SECRET = os.getenv(key=args.access_secret_env_name)
     MINIO_URL = os.getenv(key=args.minio_server_url_env_name)
-    minio_endpoint_is_secured = os.getenv(key=args.minio_endpoint_is_secured)
+    #minio_endpoint_is_secured = os.getenv(key=args.minio_endpoint_is_secured)
     
     
     env_vars = [args.access_key_env_name,
@@ -72,7 +77,7 @@ def get_minio_client(args)->Minio:
     
     client = Minio(endpoint=MINIO_URL, access_key=ACCESS_KEY, 
                    secret_key=ACCESS_SECRET,
-                   secure=minio_endpoint_is_secured
+                   secure=args.minio_endpoint_is_secured
                    )
     return client
     
@@ -100,11 +105,13 @@ def create_upload_object(train_df, test_df, metadata,
     test_buffer.seek(0)
     
     reslist = []
+    #metadata.copy()["split_type"] = "train"
     reslist.append(ObjectToPersistData(upload_object=train_buffer, 
                         object_name=train_file_name,
                         metadata=metadata
                         )
                    )
+    #metadata.copy()["split_type"] = "test"
     reslist.append(ObjectToPersistData(upload_object=test_buffer, 
                                         object_name=test_file_name,
                                         metadata=metadata
@@ -117,12 +124,16 @@ def upload_to_minio(minio_client, bucket_name,
                     objects_to_upload: List[ObjectToPersistData],
                     **kwargs
                     ):
-    if not minio_client.bucket_exists(bucket_name):
-        minio_client.make_bucket(bucket_name)
-        logger.info(msg=f"{bucket_name} does not exist hence was created")
+    
         
     for obj in objects_to_upload:
-        minio_client.put_object(bucket_name=obj.bucket_name if obj.bucket_name else bucket_name, 
+        bucket_name = obj.bucket_name if obj.bucket_name else bucket_name
+        logger.info(f"Checking if bucket {bucket_name} exists")
+        if not minio_client.bucket_exists(bucket_name):
+            minio_client.make_bucket(bucket_name)
+            logger.info(msg=f"{bucket_name} does not exist hence was created")
+            
+        minio_client.put_object(bucket_name=bucket_name, 
                                 object_name=obj.object_name,
                                 data=obj.upload_object, 
                                 length=obj.upload_object.getbuffer().nbytes,
@@ -130,7 +141,109 @@ def upload_to_minio(minio_client, bucket_name,
                                 )
         logger.info(msg=f"{obj.object_name} successfully uploaded to {obj.bucket_name if obj.bucket_name else bucket_name}")
 
+
+
+@dataclass
+class MinioBucketRecords:
+    object_name: str
+    bucket_name: str
+    metadata: dict
+    version_id: str
+    last_modified: datetime
+    etag: str
+    size: int
+    owner_name: str
+    owner_id: str
+    is_dir: bool
+    tags: str
+
+def clean_metadata(metadata):
+    """Remove the 'x-amz-meta-' prefix from custom metadata keys."""
+    return {
+        (key.replace("x-amz-meta-", "") if key.startswith("x-amz-meta-") else key): value 
+        for key, value in metadata.items()
+    }
     
+    
+def get_object_records(minio_client: Minio, bucket_name: str, object_name: str)-> MinioBucketRecords:
+    logger.info(f"Start Getting records for {object_name} in {bucket_name} bucket")
+    stat = minio_client.stat_object(bucket_name=bucket_name,
+                                    object_name=object_name
+                                    )
+    obj_record = MinioBucketRecords(object_name=stat.object_name,
+                                    bucket_name=stat.bucket_name,
+                                    metadata=clean_metadata(stat.metadata),
+                                    version_id=stat.version_id,
+                                    last_modified=stat.last_modified,
+                                    etag=stat.etag,
+                                    size=stat.size,
+                                    owner_name=stat.owner_name if hasattr(stat, "owner_name") else None,
+                                    owner_id=stat.owner_id if hasattr(stat, "owner_id") else None,
+                                    is_dir=stat.is_dir if hasattr(stat, "is_dir") else None,
+                                    tags=stat.tags if hasattr(stat, "tags") else None
+                                    )
+    logger.info(f"Completed Getting records for {object_name} in {bucket_name} bucket")
+    return obj_record   
+
+
+def get_bucket_records(bucket_name, minio_client)-> List[MinioBucketRecords]:
+    logger.info(f"Start Gettings records in {bucket_name} bucket")
+
+    objs = minio_client.list_objects(bucket_name=bucket_name, 
+                                     recursive=True, 
+                                    include_user_meta=True, 
+                                    include_version=True,
+                                    fetch_owner=True
+                                    )
+    
+    obj_records = []
+    for obj in objs:
+        obj_record = get_object_records(minio_client=minio_client,
+                                            bucket_name=bucket_name,
+                                            object_name=obj.object_name
+                                            )
+        obj_records.append(obj_record)
+    logger.info(f"Completed Gettings records for all objects in {bucket_name} bucket")
+    return obj_records
+    
+ 
+ 
+def download_from_minio(minio_client: Minio, bucket_name: str, object_name: str,
+                        dytpe: Literal["csv", "npz"]
+                        )-> pd.DataFrame: 
+                        
+    logger.info(f"Start downloading {object_name} from {bucket_name} bucket")
+    try:
+        obj_response = minio_client.get_object(bucket_name=bucket_name,
+                                                object_name=object_name
+                                                )
+        data = obj_response.read()
+        data_stream = io.BytesIO(data)
+        data_stream.seek(0)
+        if dytpe == "csv":
+            df = pd.read_csv(data_stream)
+        elif dytpe == "npz":
+            df = np.load(data_stream)
+        logger.info(f"Loaded {object_name} from {bucket_name} bucket")
+        return df
+    except S3Error as err:
+        logger.error(f"Error downloading {object_name} from {bucket_name} bucket: {err}")
+        raise ValueError(f"Error downloading {object_name} from {bucket_name} bucket: {err}")
+        
+
+
+def get_func_parameters(func):
+    func_params = inspect.signature(func).parameters
+    return func_params
+
+def get_expected_params_for_func(func, **kwargs):
+    func_params = get_func_parameters(func)
+    expected_params = {param: value for param, value in kwargs.items() 
+                       if param in func_params.keys()
+                       }
+    return expected_params
+    
+     
 def main():
     args = parse_arguments()
     dataset_uuid = str(uuid.uuid4())
@@ -184,10 +297,33 @@ def main():
                                                 test_df=test_df, test_file_name=test_file_name,
                                                 metadata=metadata
                                                 )
+        train_buffer = io.BytesIO()
+        test_buffer = io.BytesIO()
+        train_df.to_csv(train_buffer, index=False)
+        test_df.to_csv(test_buffer, index=False)
+        train_buffer.seek(0)
+        test_buffer.seek(0)
+        train_metdata = copy.deepcopy(metadata)
+        train_metdata["split_type"] = "train"
+        test_metdata = copy.deepcopy(metadata)
+        test_metdata["split_type"] = "test"
+        objects_to_upload = []
+        for upload_obj, obj_name, obj_metadata in zip([train_buffer, test_buffer], 
+                                                        [train_file_name, test_file_name], 
+                                                        [train_metdata, test_metdata]
+                                                        ):
+            
+            objects_to_upload.append(ObjectToPersistData(upload_object=upload_obj, 
+                                                        object_name=obj_name,
+                                                        metadata=obj_metadata
+                                                        )
+                                    )
         upload_to_minio(objects_to_upload=objects_to_upload,
                         metadata=metadata, bucket_name=args.bucket_name,
                         minio_client=minio_client
                         )
+    
+    
     
 if __name__ == "__main__":
     main()
