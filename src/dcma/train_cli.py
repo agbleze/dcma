@@ -49,6 +49,9 @@ def parse_argumments():
     parser.add_argument("--include_sample_weight", action="store_true",
                         help="Whether to include sample weight in the training"
                         )
+    parser.add_argument("--target_variable", type=str, required=True,
+                        help="Target variable name"
+                        )
     
     
     return parser.parse_args()
