@@ -10,7 +10,7 @@ import logging
 import numpy as np
 import json
 import os
-
+import functools
 
 logging.basicConfig(level=logging.INFO,
                              format="%(asctime)s - %(levelname)s - %(message)s"
@@ -19,28 +19,50 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 
-def get_positions(metadata: dict, variable_names: list):
+
+
+def dynamic_log(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        custom_msg = kwargs.pop("_log_msg", None)
+        if not custom_msg:
+            pass
+        
+        
+    
+def get_positions(metadata: dict, variable_names: list, **kwargs):
+    custom_msg = kwargs.pop("_log_msg", None)
     variables_not_found = [pred for pred in variable_names if pred not in metadata]
     if variables_not_found:
-        logger.error(f"{variables_not_found} not found in metadata.")
+        logger.error(f"{custom_msg if custom_msg else ''} {variables_not_found} not found in metadata.")
         raise ValueError(f"{variables_not_found} not found in metadata.")
     var_positions = [metadata[var] for var in variable_names]
-    logger.info(f"Variables '{var_positions}' are at positions: {var_positions} (indices)")
+    logger.info(f"{custom_msg if custom_msg else ''} '{variable_names}' {'are' if len(variable_names) > 1 else 'is'} at position{f's {var_positions} (indices)' if len(var_positions)>1 else f' {var_positions} (index)'}")
     return var_positions
 
 
 def get_object_name(bucket_record, dataset_uid, split_type):
     if (bucket_record.metadata.get("uid") == dataset_uid) and (bucket_record.metadata["split_type"] == split_type):
-        train_obj_name = split_type.object_name
-        logger.info(f"Retrieved train object name: {train_obj_name}")
+        obj_name = split_type.object_name
+        if not obj_name:
+            logger.info(f"Retrieved {split_type} object name: {obj_name}")
     else:
-        train_obj_name = None
-    return train_obj_name
+        obj_name = None
+    return obj_name
 
-def get_variable_position(bucket_record, variable, split_type, dataset_uid):
+def get_variable_position_from_minio_metadata(bucket_record, variable: list, 
+                                              split_type: str, 
+                                              dataset_uid: str,
+                                              **kwargs
+                                              ):
+    _log_msg = kwargs.pop("_log_msg", None)
     if (bucket_record.get("uid") == dataset_uid) and (bucket_record["split_type"] == split_type):
         var_position_metadata = bucket_record.metadata.get("column_positions", {})
-        var_position = get_positions(var_position_metadata, [variable])
+        if isinstance(variable, str):
+            variable = [variable]
+        var_position = get_positions(metadata=var_position_metadata, variable_names=variable,
+                                     _log_msg=_log_msg
+                                     )
     else:
         var_position = None
     return var_position
@@ -73,6 +95,7 @@ def parse_argumments():
     parser.add_argument("--local_train_data_path", type=str)
     parser.add_argument("--local_test_data_path", type=str)
     parser.add_argument("--train_preprocessed_metadata_filepath", type=str)
+    parser.add_argument("--test_preprocessed_metadata_filepath", type=str)
     parser.add_argument("--include_sample_weight", action="store_true",
                         help="Whether to include sample weight in the training"
                         )
@@ -92,6 +115,10 @@ def main():
     test_obj_name = None
     target_variable = args.target_variable
     predictors = args.predictor_variables
+    train_target_position = None
+    test_target_position = None
+    train_predictor_positions = None
+    test_predictor_positions = None
     
     if args.read_data_from_minio or args.upload_output_to_minio:
         minio_client = get_minio_client(args=args)
@@ -107,50 +134,113 @@ def main():
         
         
         for bc in bucket_records:
-            if (bc.metadata.get("uid") == args.dataset_uid) and (bc.metadata["split_type"] == "train"):
-                train_obj_name = bc.object_name
-                logger.info(f"Retrieved train object name: {train_obj_name}")
-                col_position = bc.metadata.get("column_positions", {})
-                if not col_position:
-                    logger.error(f"Column positions metadata not found for Train data object {train_obj_name}.")
-                    raise ValueError(f"Column positions metadata not found for Train data object {train_obj_name}.")
-                    
-                if target_variable in col_position:
-                    train_target_position = col_position[target_variable]
-                    logger.info(f"Target variable '{target_variable}' in Train data is at position: {train_target_position} (index)")
-                else:
-                    logger.error(f"Target variable '{target_variable}' not found in Train data column positions metadata.")
-                    raise ValueError(f"Target variable '{target_variable}' not found in Train data column positions metadata.")
-                
-                predictors_not_found = [pred for pred in predictors if pred not in col_position]
-                if predictors_not_found:
-                    logger.error(f"Predictor variables {predictors_not_found} not found in Train data column positions metadata.")
-                    raise ValueError(f"Predictor variables {predictors_not_found} not found in Train data column positions metadata.")
-                train_predictor_positions = [col_position[predictor] for predictor in predictors]
-                logger.info(f"Predictor variables '{predictors}' in Train data are at positions: {train_predictor_positions} (indices)")
-                #break
+            if (train_obj_name and test_obj_name and train_target_position and 
+                test_target_position and train_predictor_positions and
+                test_predictor_positions
+                ):
+                break
             
-            if (bc.metadata.get("uid") == args.dataset_uid) and (bc.metadata["split_type"] == "test"):
-                test_obj_name = bc.object_name
-                logger.info(f"Retrieved test object name: {test_obj_name}")
+            if not train_obj_name:
+                train_obj_name = get_object_name(bucket_record=bc, dataset_uid=args.dataset_uid, 
+                                                 split_type="train"
+                                                 )
+            if not test_obj_name:
+                test_obj_name = get_object_name(bucket_record=bc, dataset_uid=args.dataset_uid, 
+                                                split_type="test"
+                                                )
+            if not train_target_position:
+                if isinstance(target_variable, str):
+                    target_variable = [target_variable]
+                train_target_position = get_variable_position_from_minio_metadata(bucket_record=bc, 
+                                                                                  variable=target_variable, 
+                                                                                    split_type="train", 
+                                                                                    dataset_uid=args.dataset_uid,
+                                                                                    _log_msg=f"Object name {bc.object_name} Train Target"
+                                                                                    )
+            if not test_target_position:
+                if isinstance(target_variable, str):
+                    target_variable = [target_variable]
+                test_target_position = get_variable_position_from_minio_metadata(bucket_record=bc, 
+                                                             variable=target_variable,
+                                                              split_type="test", 
+                                                              dataset_uid=args.dataset_uid,
+                                                              _log_msg=f"Object name {bc.object_name} Test Target"
+                                                              )
+            if not train_predictor_positions:
+                train_predictor_positions = get_variable_position_from_minio_metadata(bucket_record=bc, 
+                                                                                      variable=predictors, 
+                                                                                    split_type="train", 
+                                                                                    dataset_uid=args.dataset_uid,
+                                                                                    _log_msg=f"Object name {bc.object_name} Train Predictor{'s' if len(predictors) > 1 else ''}"
+                                                                                    )
+            if not test_predictor_positions:
+                test_predictor_positions = get_variable_position_from_minio_metadata(bucket_record=bc, 
+                                                                                     variable=predictors, 
+                                                                                    split_type="test", 
+                                                                                    dataset_uid=args.dataset_uid,
+                                                                                    _log_msg=f"Object name {bc.object_name} Test Predictor{'s' if len(predictors) > 1 else ''}"
+                                                                                    )
+                
+                
+        retrieved_bucket_record_objs = {"train object name": train_obj_name, 
+                                        "test object name": test_obj_name,
+                                        "train target position": train_target_position, 
+                                        "test target position": test_target_position, 
+                                        "train predictor positions": train_predictor_positions,
+                                        "test predictor positions": test_predictor_positions
+                                        }
+        not_found_bucket_record_objs = [key for key, value in retrieved_bucket_record_objs.items() if value is None]   
+        
+        if not_found_bucket_record_objs:
+            logger.error(f"Could not retrieve the following bucket record objects: {not_found_bucket_record_objs}")
+            raise ValueError(f"Could not retrieve the following bucket record objects: {not_found_bucket_record_objs}")
+        
+        
+                
+            # if (bc.metadata.get("uid") == args.dataset_uid) and (bc.metadata["split_type"] == "train"):
+            #     train_obj_name = bc.object_name
+            #     logger.info(f"Retrieved train object name: {train_obj_name}")
+            #     col_position = bc.metadata.get("column_positions", {})
+            #     if not col_position:
+            #         logger.error(f"Column positions metadata not found for Train data object {train_obj_name}.")
+            #         raise ValueError(f"Column positions metadata not found for Train data object {train_obj_name}.")
+                    
+            #     if target_variable in col_position:
+            #         train_target_position = col_position[target_variable]
+            #         logger.info(f"Target variable '{target_variable}' in Train data is at position: {train_target_position} (index)")
+            #     else:
+            #         logger.error(f"Target variable '{target_variable}' not found in Train data column positions metadata.")
+            #         raise ValueError(f"Target variable '{target_variable}' not found in Train data column positions metadata.")
+                
+            #     predictors_not_found = [pred for pred in predictors if pred not in col_position]
+            #     if predictors_not_found:
+            #         logger.error(f"Predictor variables {predictors_not_found} not found in Train data column positions metadata.")
+            #         raise ValueError(f"Predictor variables {predictors_not_found} not found in Train data column positions metadata.")
+            #     train_predictor_positions = [col_position[predictor] for predictor in predictors]
+            #     logger.info(f"Predictor variables '{predictors}' in Train data are at positions: {train_predictor_positions} (indices)")
+            #     #break
+            
+            # if (bc.metadata.get("uid") == args.dataset_uid) and (bc.metadata["split_type"] == "test"):
+            #     test_obj_name = bc.object_name
+            #     logger.info(f"Retrieved test object name: {test_obj_name}")
 
-                col_position = bc.metadata.get("column_positions", {})
-                if not col_position:
-                    logger.error(f"Column positions metadata not found in Test data for object {test_obj_name}.")
-                    raise ValueError(f"Column positions metadata not found in Test data for object {test_obj_name}.")
-                if target_variable in col_position:
-                    test_target_position = col_position[target_variable]
-                    logger.info(f"Target variable '{target_variable}' in Test data is at position: {test_target_position} (index)")
-                else:
-                    logger.error(f"Target variable '{target_variable}' not found in Test data column positions metadata.")
-                    raise ValueError(f"Target variable '{target_variable}' not found in Test data column positions metadata.")
-                predictors_not_found = [pred for pred in predictors if pred not in col_position]
-                if predictors_not_found:
-                    logger.error(f"Predictor variables {predictors_not_found} not found in Test data column positions metadata.")
-                    raise ValueError(f"Predictor variables {predictors_not_found} not found in Test data column positions metadata.")
-                test_predictor_positions = [col_position[predictor] for predictor in predictors]
-                logger.info(f"Predictor variables '{predictors}' in Test data are at positions: {test_predictor_positions} (indices)")
-            break
+            #     col_position = bc.metadata.get("column_positions", {})
+            #     if not col_position:
+            #         logger.error(f"Column positions metadata not found in Test data for object {test_obj_name}.")
+            #         raise ValueError(f"Column positions metadata not found in Test data for object {test_obj_name}.")
+            #     if target_variable in col_position:
+            #         test_target_position = col_position[target_variable]
+            #         logger.info(f"Target variable '{target_variable}' in Test data is at position: {test_target_position} (index)")
+            #     else:
+            #         logger.error(f"Target variable '{target_variable}' not found in Test data column positions metadata.")
+            #         raise ValueError(f"Target variable '{target_variable}' not found in Test data column positions metadata.")
+            #     predictors_not_found = [pred for pred in predictors if pred not in col_position]
+            #     if predictors_not_found:
+            #         logger.error(f"Predictor variables {predictors_not_found} not found in Test data column positions metadata.")
+            #         raise ValueError(f"Predictor variables {predictors_not_found} not found in Test data column positions metadata.")
+            #     test_predictor_positions = [col_position[predictor] for predictor in predictors]
+            #     logger.info(f"Predictor variables '{predictors}' in Test data are at positions: {test_predictor_positions} (indices)")
+            # break
             
         
         # test_obj_name = [bc.object_name for bc in bucket_records if (bc.metadata.get("uid") == args.dataset_uid) 
@@ -183,32 +273,41 @@ def main():
             train_preprocessed_metadata = json.load(f)
         train_class_weight = train_preprocessed_metadata.get("class_weight")
         
+        with open(args.test_preprocessed_metadata_filepath, "r") as fp:
+            test_preprocessed_metadata = json.load(fp)
+        
         # add dynamic logging decorator with message eg. Train data metadata  for column positions
         
         
         
-        col_position = train_preprocessed_metadata.get("column_positions", {})
+        train_var_pos_metadata = train_preprocessed_metadata.get("column_positions", {})
+        test_var_pos_metadata = test_preprocessed_metadata.get("columns_positions", {})
         
-        get_positions(col_position, predictors)
-        if not col_position:
-            logger.error(f"Local Column positions metadata not found for Train data.")
-            raise ValueError(f"Local Column positions metadata not found for Train data")
-            
-        if target_variable in col_position:
-            train_target_position = col_position[target_variable]
-            logger.info(f"Target variable '{target_variable}' in Train data is at position: {train_target_position} (index)")
-        else:
-            logger.error(f"Target variable '{target_variable}' not found in Train data column positions metadata.")
-            raise ValueError(f"Target variable '{target_variable}' not found in Train data column positions metadata.")
+        if not train_var_pos_metadata:
+            logger.error(f"Local file {args.local_train_data_path} Train Column positions metadata not found with key 'columns_positions'.")
+            raise ValueError(f"Local file {args.local_train_data_path} Train Column positions metadata not found with key 'columns_positions'.")
         
-        predictors_not_found = [pred for pred in predictors if pred not in col_position]
-        if predictors_not_found:
-            logger.error(f"Predictor variables {predictors_not_found} not found in Train data column positions metadata.")
-            raise ValueError(f"Predictor variables {predictors_not_found} not found in Train data column positions metadata.")
-        train_predictor_positions = [col_position[predictor] for predictor in predictors]
-        logger.info(f"Predictor variables '{predictors}' in Train data are at positions: {train_predictor_positions} (indices)")
-        #break
-    
+        if not test_var_pos_metadata:
+            logger.error(f"Local file {args.local_test_data_path} Test Column positions metadata not found with key 'columns_positions'.")
+            raise ValueError(f"Local file {args.local_test_data_path} Test Column positions metadata not found with key 'columns_positions'.")
+        
+        train_target_position = get_positions(metadata=train_var_pos_metadata, 
+                                              variable_names=target_variable,
+                                              _log_msg=f"Local file {args.local_train_data_path} Train Target"
+                                              )
+        test_target_position = get_positions(metadata=test_var_pos_metadata,
+                                              variable_names=target_variable,
+                                              _log_msg=f"Local file {args.local_test_data_path} Test Target"
+                                              )
+        train_predictor_positions = get_positions(metadata=train_var_pos_metadata,
+                                                  variable_names=predictors,
+                                                  _log_msg=f"Local file {args.local_train_data_path} Train Predictor{'s' if len(predictors) > 1 else ''}"
+                                                  )
+        test_predictor_positions = get_positions(metadata=test_var_pos_metadata,
+                                                  variable_names=predictors,
+                                                  _log_msg=f"Local file {args.local_test_data_path} Test Predictor{'s' if len(predictors) > 1 else ''}"
+                                                  )
+        
     train_npz = train_data.get("preprocessed_data")
     training_target = train_npz[:, train_target_position]
     training_predictors = train_npz[:, train_predictor_positions]
