@@ -11,6 +11,7 @@ import numpy as np
 import json
 import os
 import functools
+from mlflow_wrapper import run_with_mlflow
 
 logging.basicConfig(level=logging.INFO,
                              format="%(asctime)s - %(levelname)s - %(message)s"
@@ -101,6 +102,12 @@ def parse_argumments():
                         )
     parser.add_argument("--target_variable", type=str, required=True,
                         help="Target variable name"
+                        )
+    parser.add_argument("--mlflow_tracking_uri", type=str, required=True,
+                        help="MLflow tracking URI"
+                        )
+    parser.add_argument("--predictor_variables", nargs="+", required=True,
+                        help="Predictor variable names"
                         )
     
     
@@ -329,19 +336,22 @@ def main():
                             model_type=args.model_type,
                             #model_registry=args.model_registry,
                             )
-    trainer.run_model_training_pipeline(cv=20, 
-                                        scoring=args.scoring, #['accuracy', "precision", "recall", "f1"],
-                                        model_result_metrics=args.model_result_metrics,
+    run_with_mlflow(tracking_uri=trainer, run_params=args,
+                    tracking_uri=args.mlflow_tracking_uri
+                    )
+    # trainer.run_model_training_pipeline(cv=20, 
+    #                                     scoring=args.scoring, #['accuracy', "precision", "recall", "f1"],
+    #                                     model_result_metrics=args.model_result_metrics,
                                         
-                                        # ['test_accuracy',  'train_accuracy',
-                                        #                       'test_precision', 'train_precision',
-                                        #                       'test_recall', 'train_recall',
-                                        #                       'test_f1', 'train_f1'
-                                        #                       ],
-                                        evaluation_metric=args.evaluation_metric, #"accuracy_score",
-                                        save_model_as=args.save_model_as, #"conversion_proba.model",
-                                        save_dir="model_store"
-                                        )
+    #                                     # ['test_accuracy',  'train_accuracy',
+    #                                     #                       'test_precision', 'train_precision',
+    #                                     #                       'test_recall', 'train_recall',
+    #                                     #                       'test_f1', 'train_f1'
+    #                                     #                       ],
+    #                                     evaluation_metric=args.evaluation_metric, #"accuracy_score",
+    #                                     save_model_as=args.save_model_as, #"conversion_proba.model",
+    #                                     save_dir="model_store"
+    #                                     )
     
 
 if __name__ == "__main__":
