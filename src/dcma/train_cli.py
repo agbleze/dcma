@@ -36,15 +36,15 @@ def get_positions(metadata: dict, variable_names: list, **kwargs):
     variables_not_found = [pred for pred in variable_names if pred not in metadata]
     if variables_not_found:
         logger.error(f"{custom_msg if custom_msg else ''} {variables_not_found} not found in metadata.")
-        raise ValueError(f"{variables_not_found} not found in metadata.")
-    var_positions = [metadata[var] for var in variable_names]
+        raise ValueError(f"{custom_msg if custom_msg else ''} {variables_not_found} not found in metadata.")
+    var_positions = [metadata.get(var) for var in variable_names]
     logger.info(f"{custom_msg if custom_msg else ''} '{variable_names}' {'are' if len(variable_names) > 1 else 'is'} at position{f's {var_positions} (indices)' if len(var_positions)>1 else f' {var_positions} (index)'}")
     return var_positions
 
 
 def get_object_name(bucket_record, dataset_uid, split_type):
     if (bucket_record.metadata.get("uid") == dataset_uid) and (bucket_record.metadata["split_type"] == split_type):
-        obj_name = split_type.object_name
+        obj_name = bucket_record.object_name
         if not obj_name:
             logger.info(f"Retrieved {split_type} object name: {obj_name}")
     else:
@@ -57,8 +57,9 @@ def get_variable_position_from_minio_metadata(bucket_record, variable: list,
                                               **kwargs
                                               ):
     _log_msg = kwargs.pop("_log_msg", None)
-    if (bucket_record.get("uid") == dataset_uid) and (bucket_record["split_type"] == split_type):
-        var_position_metadata = bucket_record.metadata.get("column_positions", {})
+    if (bucket_record.metadata.get("uid") == dataset_uid) and (bucket_record.metadata["split_type"] == split_type):
+        var_position_metadata = bucket_record.metadata.get("column_position_map", {})
+        var_position_metadata = json.loads(var_position_metadata) if isinstance(var_position_metadata, str) else var_position_metadata
         if isinstance(variable, str):
             variable = [variable]
         var_position = get_positions(metadata=var_position_metadata, variable_names=variable,
@@ -85,7 +86,7 @@ def parse_argumments():
                         nargs="+"
                         )
     parser.add_argument("--download_bucket_name", type=str)
-    parser.add_argument("--dataset_uid", type=str)
+    parser.add_argument("--dataset_uid", type=str, required=True)
     parser.add_argument("--upload_output_to_minio", action="store_true")
     parser.add_argument("--access_key_env_name", default="MINIO_ACCESS_KEY", help="Env var name for MinIO access key")
     parser.add_argument("--access_secret_env_name", default="MINIO_SECRET_KEY", help="Env var name for MinIO secret key")
@@ -118,6 +119,7 @@ def main():
     args = parse_argumments()
     logger.info(f"Arguments: {args}")
     print(f"args type: {type(args)}")
+    print(f"args dict: {vars(args)}")
     train_obj_name = None
     test_obj_name = None
     target_variable = args.target_variable
@@ -134,11 +136,6 @@ def main():
         bucket_records = get_bucket_records(bucket_name=args.download_bucket_name,
                                             minio_client=minio_client
                                             )
-        #print(bucket_records[0].metadata["uid"])
-        # train_obj_name = [bc.object_name for bc in bucket_records if (bc.metadata.get("uid") == args.dataset_uid) 
-        #                     and (bc.metadata["split_type"] == "train")
-        #                 ]
-        
         
         for bc in bucket_records:
             if (train_obj_name and test_obj_name and train_target_position and 
@@ -159,7 +156,7 @@ def main():
                 if isinstance(target_variable, str):
                     target_variable = [target_variable]
                 train_target_position = get_variable_position_from_minio_metadata(bucket_record=bc, 
-                                                                                  variable=target_variable, 
+                                                                                  variable=target_variable[0], 
                                                                                     split_type="train", 
                                                                                     dataset_uid=args.dataset_uid,
                                                                                     _log_msg=f"Object name {bc.object_name} Train Target"
@@ -168,7 +165,7 @@ def main():
                 if isinstance(target_variable, str):
                     target_variable = [target_variable]
                 test_target_position = get_variable_position_from_minio_metadata(bucket_record=bc, 
-                                                             variable=target_variable,
+                                                             variable=target_variable[0],
                                                               split_type="test", 
                                                               dataset_uid=args.dataset_uid,
                                                               _log_msg=f"Object name {bc.object_name} Test Target"
@@ -204,18 +201,19 @@ def main():
  
         
         if args.include_sample_weight:
-            train_class_weight = [bc.metadata.get("class_weight") for bc in bucket_records if bc.object_name == train_obj_name[0]
+            train_class_weight = [bc.metadata.get("class_weight") for bc in bucket_records 
+                                  if bc.object_name == train_obj_name
                                 ][0]
             
         
         train_data = download_from_minio(minio_client=minio_client, 
                                         bucket_name=args.download_bucket_name, 
-                                        object_name=train_obj_name[0],
+                                        object_name=train_obj_name,
                                         dytpe="npz"
                                         )
         test_data = download_from_minio(minio_client=minio_client, 
                                         bucket_name=args.download_bucket_name, 
-                                        object_name=test_obj_name[0],
+                                        object_name=test_obj_name,
                                         dytpe="npz"
                                         )
     elif not args.read_data_from_minio:
@@ -278,7 +276,7 @@ def main():
                             model_type=args.model_type,
                             #model_registry=args.model_registry,
                             )
-    run_with_mlflow(tracking_uri=trainer, run_params=args,
+    run_with_mlflow(trainer=trainer, run_params=vars(args),
                     tracking_uri=args.mlflow_tracking_uri
                     )
     # trainer.run_model_training_pipeline(cv=20, 
