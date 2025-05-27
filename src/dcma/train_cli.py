@@ -118,8 +118,6 @@ def parse_argumments():
 def main():
     args = parse_argumments()
     logger.info(f"Arguments: {args}")
-    print(f"args type: {type(args)}")
-    print(f"args dict: {vars(args)}")
     train_obj_name = None
     test_obj_name = None
     target_variable = args.target_variable
