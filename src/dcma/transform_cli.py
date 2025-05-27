@@ -4,7 +4,7 @@ import pandas as pd
 
 
 
-def main():
+def parse_arguments():
     parser = argparse.ArgumentParser(description="Run Data transformation")
     parser.add_argument("--conversion_classifier_path", required=True)
     parser.add_argument("--read_data_from_minio",
@@ -36,6 +36,10 @@ def main():
     
     
     args = parser.parse_args()
+    return args
+
+def main():
+    
     
     train_cpa = transform_data_with_conversion(data=train_cpa, 
                                                variable_encoder_map=feat_encoder_dict,
