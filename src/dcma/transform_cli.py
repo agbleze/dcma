@@ -39,6 +39,7 @@ def parse_arguments():
     return args
 
 def main():
+    args = parse_arguments()
     
     
     train_cpa = transform_data_with_conversion(data=train_cpa, 
