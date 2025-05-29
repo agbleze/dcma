@@ -135,6 +135,9 @@ def main():
     test_df = compute_cpc(data=test_df)
     logger.info("Completed CPA and CPC computed")
     
+    train_cpa = train_df["CPA"].values
+    test_cpa = test_df["CPA"].values
+    
     
     # categorical_features = ['category_id', 'market_id',
     #                         'customer_id', 'publisher',
@@ -160,9 +163,12 @@ def main():
     class_weight = preprocess_pipeline.class_weight_dict
     train_preprocessed_data = preprocessed_train_datastore.full_data
     train_preprocessed_columns_inorder = preprocessed_train_datastore.full_data_columns_in_order
+    train_column_position_map = {str(col): train_preprocessed_columns_inorder.index(col) for col in train_preprocessed_columns_inorder}
+    logger.info(f"train_column_position_map: {train_column_position_map}")
     logger.info(f"train_preprocessed_data shape: {train_preprocessed_data.shape}")
     logger.info(f"train_preprocessed_columns_inorder: {train_preprocessed_columns_inorder}")
     logger.info(f"class weight: {class_weight}")
+    
     
     preprocessed_train_filename = f"train_{preprocess_dataset_uuid}.npz"
     train_preprocessed_metadata = {"split_type": "train",
@@ -174,6 +180,7 @@ def main():
                                     "parent_uid": args.dataset_uid,
                                     "uid": preprocess_dataset_uuid,
                                     "column_order": train_preprocessed_columns_inorder,
+                                    "column_position_map": json.dumps(train_column_position_map),
                                     #"file_name": preprocessed_train_filename,
                                     "class_weight": class_weight, #str(sample_weight.tolist())
                                     "class_weight_based_on": args.categorical_target
@@ -207,12 +214,15 @@ def main():
                                                                                 )
     test_preprocessed_data = preprocessed_test_datastore.full_data
     test_preprocessed_columns_inorder = preprocessed_test_datastore.full_data_columns_in_order
+    test_column_position_map = {str(col): test_preprocessed_columns_inorder.index(col) for col in test_preprocessed_columns_inorder}
+    logger.info(f"test_column_position_map: {test_column_position_map}")
     logger.info(f"test_preprocessed_data shape: {test_preprocessed_data.shape}")
     logger.info(f"test_preprocessed_columns_inorder: {test_preprocessed_columns_inorder}")
     
     test_preprocessed_metadata = copy.deepcopy(train_preprocessed_metadata)
     preprocessed_test_filename = f"test_{preprocess_dataset_uuid}.npz"
     test_preprocessed_metadata["split_type"] = "test"
+    test_preprocessed_metadata["column_position_map"] = json.dumps(test_column_position_map)
     
     test_preprocessed_metadata["column_order"] = test_preprocessed_columns_inorder
     test_preprocessed_metadata_file = f"test_preprocessed_metadata_{preprocess_dataset_uuid}.json"
@@ -221,10 +231,12 @@ def main():
     if not args.upload_output_to_minio:
         logger.info("Start saving preprocessed data locally")
         np.savez_compressed(file=os.path.join(f"{args.local_preprocess_store}", {preprocessed_train_filename}), 
-                            preprocessed_data=train_preprocessed_data
+                            preprocessed_data=train_preprocessed_data,
+                            cpa=train_cpa
                             )
         np.savez_compressed(file=os.path.join(f"{args.local_preprocess_store}", preprocessed_test_filename), 
-                            preprocessed_data=test_preprocessed_data
+                            preprocessed_data=test_preprocessed_data,
+                            cpa=test_cpa
                             )
         logger.info("Completed saving preprocessed data locally")
         
@@ -270,7 +282,8 @@ def main():
         logger.info("Start creating preprocessed data objects for upload")
         preprocessed_train_buffer = io.BytesIO()
         np.savez_compressed(file=preprocessed_train_buffer, 
-                            preprocessed_data=train_preprocessed_data
+                            preprocessed_data=train_preprocessed_data,
+                            cpa=train_cpa
                             )
         preprocessed_train_buffer.seek(0)
         
@@ -283,7 +296,8 @@ def main():
         
         preprocessed_test_buffer = io.BytesIO()
         np.savez_compressed(file=preprocessed_test_buffer, 
-                            preprocessed_data=test_preprocessed_data
+                            preprocessed_data=test_preprocessed_data,
+                            cpa=test_cpa
                             )
         preprocessed_test_buffer.seek(0)
         
