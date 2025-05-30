@@ -169,6 +169,19 @@ def main():
     logger.info(f"train_preprocessed_columns_inorder: {train_preprocessed_columns_inorder}")
     logger.info(f"class weight: {class_weight}")
     
+    train_convert = train_preprocessed_data[:, train_preprocessed_columns_inorder.index(args.target_variable)]
+    train_predictors = train_preprocessed_data[:, 1:]
+    #train_predictor_names = [nm for nm in train_preprocessed_columns_inorder if nm != args.target_variable]
+    
+    train_predictor_names = []
+    for nm in train_preprocessed_columns_inorder:
+        if (nm != args.target_variable and not isinstance(nm, list)):
+            train_predictor_names.append(nm)
+        elif (nm != args.target_variable and isinstance(nm, list)):
+            train_predictor_names.append(nm[0])
+    
+    logger.info(f"train_predictor_names: {train_predictor_names}")
+    
     
     preprocessed_train_filename = f"train_{preprocess_dataset_uuid}.npz"
     train_preprocessed_metadata = {"split_type": "train",
@@ -219,6 +232,16 @@ def main():
     logger.info(f"test_preprocessed_data shape: {test_preprocessed_data.shape}")
     logger.info(f"test_preprocessed_columns_inorder: {test_preprocessed_columns_inorder}")
     
+    test_convert = test_preprocessed_data[:, 0]
+    test_predictors = test_preprocessed_data[:, 1:]
+    test_predictor_names = []
+    for nm in test_preprocessed_columns_inorder:
+        if (nm != args.target_variable and not isinstance(nm, list)):
+            test_predictor_names.append(nm)
+        elif (nm != args.target_variable and isinstance(nm, list)):
+            test_predictor_names.append(nm[0])
+            
+    logger.info(f"test_predictor_names: {test_predictor_names}")
     test_preprocessed_metadata = copy.deepcopy(train_preprocessed_metadata)
     preprocessed_test_filename = f"test_{preprocess_dataset_uuid}.npz"
     test_preprocessed_metadata["split_type"] = "test"
@@ -232,11 +255,17 @@ def main():
         logger.info("Start saving preprocessed data locally")
         np.savez_compressed(file=os.path.join(f"{args.local_preprocess_store}", {preprocessed_train_filename}), 
                             preprocessed_data=train_preprocessed_data,
-                            cpa=train_cpa
+                            cpa=train_cpa,
+                            convert=train_convert,
+                            predictors=train_predictors,
+                            predictor_names=np.array(train_predictor_names)
                             )
         np.savez_compressed(file=os.path.join(f"{args.local_preprocess_store}", preprocessed_test_filename), 
                             preprocessed_data=test_preprocessed_data,
-                            cpa=test_cpa
+                            cpa=test_cpa,
+                            convert=test_convert,
+                            predictors=test_predictors,
+                            predictor_names=np.array(test_predictor_names)
                             )
         logger.info("Completed saving preprocessed data locally")
         
@@ -283,7 +312,9 @@ def main():
         preprocessed_train_buffer = io.BytesIO()
         np.savez_compressed(file=preprocessed_train_buffer, 
                             preprocessed_data=train_preprocessed_data,
-                            cpa=train_cpa
+                            cpa=train_cpa, convert=train_convert,
+                            predictors=train_predictors,
+                            predictor_names=np.array(train_predictor_names),
                             )
         preprocessed_train_buffer.seek(0)
         
@@ -297,7 +328,9 @@ def main():
         preprocessed_test_buffer = io.BytesIO()
         np.savez_compressed(file=preprocessed_test_buffer, 
                             preprocessed_data=test_preprocessed_data,
-                            cpa=test_cpa
+                            cpa=test_cpa, convert=test_convert,
+                            predictors=test_predictors,
+                            predictor_names=np.array(test_predictor_names),
                             )
         preprocessed_test_buffer.seek(0)
         
