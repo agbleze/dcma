@@ -163,22 +163,35 @@ def main():
     class_weight = preprocess_pipeline.class_weight_dict
     train_preprocessed_data = preprocessed_train_datastore.full_data
     train_preprocessed_columns_inorder = preprocessed_train_datastore.full_data_columns_in_order
-    train_column_position_map = {str(col): train_preprocessed_columns_inorder.index(col) for col in train_preprocessed_columns_inorder}
+    
+    train_preprocessed_columns = []
+    for nm in train_preprocessed_columns_inorder:
+        if (not isinstance(nm, list)):
+            train_preprocessed_columns.append(nm)
+        elif (isinstance(nm, list)):
+            train_preprocessed_columns.append(nm[0])
+    
+    train_predictor_names = [nm for nm in train_preprocessed_columns_inorder 
+                             if nm != args.target_variable
+                             ]
+    train_column_position_map = {str(col): train_preprocessed_columns.index(col) 
+                                 for col in train_preprocessed_columns
+                                 }
     logger.info(f"train_column_position_map: {train_column_position_map}")
     logger.info(f"train_preprocessed_data shape: {train_preprocessed_data.shape}")
-    logger.info(f"train_preprocessed_columns_inorder: {train_preprocessed_columns_inorder}")
+    logger.info(f"train variables inorder: {train_preprocessed_columns}")
     logger.info(f"class weight: {class_weight}")
     
     train_convert = train_preprocessed_data[:, train_preprocessed_columns_inorder.index(args.target_variable)]
     train_predictors = train_preprocessed_data[:, 1:]
     #train_predictor_names = [nm for nm in train_preprocessed_columns_inorder if nm != args.target_variable]
     
-    train_predictor_names = []
-    for nm in train_preprocessed_columns_inorder:
-        if (nm != args.target_variable and not isinstance(nm, list)):
-            train_predictor_names.append(nm)
-        elif (nm != args.target_variable and isinstance(nm, list)):
-            train_predictor_names.append(nm[0])
+    # train_predictor_names = []
+    # for nm in train_preprocessed_columns_inorder:
+    #     if (nm != args.target_variable and not isinstance(nm, list)):
+    #         train_predictor_names.append(nm)
+    #     elif (nm != args.target_variable and isinstance(nm, list)):
+    #         train_predictor_names.append(nm[0])
     
     logger.info(f"train_predictor_names: {train_predictor_names}")
     
@@ -192,10 +205,9 @@ def main():
                                     "encoder_uid": str(encoder_uuid),
                                     "parent_uid": args.dataset_uid,
                                     "uid": preprocess_dataset_uuid,
-                                    "column_order": train_preprocessed_columns_inorder,
+                                    "column_order": train_preprocessed_columns,
                                     "column_position_map": json.dumps(train_column_position_map),
-                                    #"file_name": preprocessed_train_filename,
-                                    "class_weight": class_weight, #str(sample_weight.tolist())
+                                    "class_weight": class_weight,
                                     "class_weight_based_on": args.categorical_target
                                     }
     train_preprocessed_metadata_file = f"train_preprocessed_metadata_{preprocess_dataset_uuid}.json"
@@ -208,9 +220,9 @@ def main():
                        preprocess_pipeline.categorical_features
                        ]
     
-    feature_encoded_metadata = {"categorical_target": args.categorical_target, #"convert",
-                                "encoder_type": args.encoder_type, #"frequency_encoding",
-                                "stats_to_compute": args.stats_to_compute, #"count",
+    feature_encoded_metadata = {"categorical_target": args.categorical_target,
+                                "encoder_type": args.encoder_type,
+                                "stats_to_compute": args.stats_to_compute,
                                 "uid": str(encoder_uuid),
                                 "parent_uid": str(args.dataset_uid)
                                 }
@@ -227,6 +239,8 @@ def main():
                                                                                 )
     test_preprocessed_data = preprocessed_test_datastore.full_data
     test_preprocessed_columns_inorder = preprocessed_test_datastore.full_data_columns_in_order
+    logger.info(f"test_preprocessed_columns_inorder: {test_preprocessed_columns_inorder}")
+    exit()
     test_column_position_map = {str(col): test_preprocessed_columns_inorder.index(col) for col in test_preprocessed_columns_inorder}
     logger.info(f"test_column_position_map: {test_column_position_map}")
     logger.info(f"test_preprocessed_data shape: {test_preprocessed_data.shape}")
