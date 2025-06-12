@@ -69,7 +69,6 @@ def main():
     test_predictor_positions = None
     if args.read_data_from_minio:
         minio_client = get_minio_client(args=args)
-    #os.environ["MLFLOW_S3_ENDPOINT_URL"] = os.getenv(args.minio_server_url_env_name)
     os.environ["AWS_ACCESS_KEY_ID"] = os.getenv(args.access_key_env_name)
     os.environ["AWS_SECRET_ACCESS_KEY"] = os.getenv(args.access_secret_env_name)
     pyfunc_model = mlflow.sklearn.load_model(args.model_uri)
@@ -139,23 +138,43 @@ def main():
        
         logger.info("Completed getting predictor positions from MinIO metadata")
     
-    
+
     train_npz = train_data.get("preprocessed_data")
+    train_cpa = train_data.get("cpa")
+    
+    
     logger.info(f"Train data shape: {train_npz.shape}")
     logger.info(f"Train Predictor positions: {train_predictor_positions}")
-    training_predictors = train_npz[:, train_predictor_positions]
+    
+    train_predictor_names = train_data.get("predictor_names")
+    training_predictors = train_data.get("predictors") #train_npz[:, train_predictor_positions]
+    
+    # if len(predictor_names) == len(predictors):
+    #     training_predictors = train_data.get("predictors") #train_npz[:, train_predictor_positions]
+    # else:
+    #     for p in predictors:
+    #         if p not in predictor_names:
+    #             logger.warning(f"Predictor {p} is not a valid predictor name in data.")
+        
+    #     if training_predictors.shape[1] > len(predictors):
+    #         if predictor_names[-1] in predictors:
+    #             pred_index = predictor_names.index(predictor_names[-1])
+    #             tailing_predictors = training_predictors[:, pred_index:]
+            
     
     test_npz = test_data.get("preprocessed_data")
+    test_cpa = test_data.get("cpa")
     logger.info(f"Test data shape: {test_npz.shape}")
     logger.info(f"Test Predictor positions: {test_predictor_positions}")
-    testing_predictors = test_npz[:, test_predictor_positions]
+    testing_predictors = test_data.get("predictors") #test_npz[:, test_predictor_positions]
+    test_predictor_names = test_data.get("predictor_names")
     logger.info(f"Training predictors shape: {training_predictors.shape}")
     logger.info(f"Testing predictors shape: {testing_predictors.shape}")
     
     train_proba = pyfunc_model.predict_proba(training_predictors)[:, 1]
     logger.info(f"Train prediction shape: {train_proba.shape}")
     logger.info(f"Train prediction: {train_proba}")
-    #exit()
+    
     train_proba_single_col = train_proba.reshape(-1,1)
     test_proba = pyfunc_model.predict_proba(testing_predictors)[:, 1]
     test_proba_single_col = test_proba.reshape(-1,1)
@@ -166,8 +185,10 @@ def main():
     print(f"type of test probabilities: {type(test_proba)}")
     logger.info(f"Augmented train data shape: {augmented_train_data.shape}")
     logger.info(f"Augmented test data shape: {augmented_test_data.shape}")
-    
-    predictors.append("conversion_probability")
+    train_predictor_names = np.append(train_predictor_names, "conversion_probability")
+    test_predictor_names = np.append(test_predictor_names, "conversion_probability")
+    logger.info(f"Train predictor names: {train_predictor_names}")
+    logger.info(f"Test predictor names: {test_predictor_names}")
     
     artifacts_list = []
     augment_train_filename = f"train_{augment_dataset_uid}.npz"
@@ -175,15 +196,17 @@ def main():
     if args.upload_output_to_minio:
         augment_train_buffer = io.BytesIO()
         np.savez_compressed(file=augment_train_buffer, 
-                            augment_train_predictors=augmented_train_data,
-                            predictor_names=np.array(predictors)
+                            predictors=augmented_train_data,
+                            predictor_names=np.array(train_predictor_names),
+                            cpa=train_cpa,
                             )
         augment_train_buffer.seek(0)
         
         augment_test_buffer = io.BytesIO()
         np.savez_compressed(file=augment_test_buffer, 
-                            augment_train_predictors=augmented_test_data,
-                            predictor_names=np.array(predictors)
+                            predictors=augmented_test_data,
+                            predictor_names=np.array(test_predictor_names),
+                            cpa=test_cpa
                             )
         augment_test_buffer.seek(0)
         args_dict = vars(args)
