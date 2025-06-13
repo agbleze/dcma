@@ -222,8 +222,10 @@ def main():
     #training_target = train_npz[:, train_target_position]
     #training_predictors = train_npz[:, train_predictor_positions]
     predictor_names = train_data.get("predictor_names")
+    logger.info(f"Train predictor names: {predictor_names}")
     if len(predictor_names) == len(predictors):
         training_predictors = train_data.get("predictors") #train_npz[:, train_predictor_positions]
+        testing_predictors = test_data.get("predictors")
     else:
         for p in predictors:
             if p not in predictor_names:
@@ -233,14 +235,26 @@ def main():
         if training_predictors.shape[1] > len(predictors):
             if predictor_names[-1] in predictors:
                 pred_index = predictor_names.index(predictor_names[-1])
-                tailing_predictors = training_predictors[:, pred_index:]
+                trail_train_predictors = training_predictors[:, pred_index:]
+                non_trail_pred_index = [predictor_names.index(p) for p in predictors if p not in predictor_names[-1]]
+                non_trail_training_predictors = training_predictors[:, non_trail_pred_index]
+                training_predictors = np.hstack((non_trail_training_predictors, trail_train_predictors))
+                
+                trail_test_predictors = testing_predictors[:, pred_index:]
+                non_trail_testing_predictors = testing_predictors[:, non_trail_pred_index]
+                testing_predictors = np.hstack((non_trail_testing_predictors, trail_test_predictors))
+                
+            else:
+                train_pred_index = [predictor_names.index(p) for p in predictors]
+                training_predictors = training_predictors[:, train_pred_index]
+                
+                testing_predictors = testing_predictors[:, train_pred_index]
   
   
-  
-    training_predictors = train_data.get("predictors")
+    #training_predictors = train_data.get("predictors")
     training_target = train_data.get(args.target_variable)
-    train_prednms = train_data.get("predictor_names")
-    logger.info(f"Train predictor names: {train_prednms}")
+    #train_prednms = train_data.get("predictor_names")
+    
     
     
     test_npz = test_data.get("preprocessed_data")
