@@ -221,6 +221,22 @@ def main():
     train_npz = train_data.get("preprocessed_data")
     #training_target = train_npz[:, train_target_position]
     #training_predictors = train_npz[:, train_predictor_positions]
+    predictor_names = train_data.get("predictor_names")
+    if len(predictor_names) == len(predictors):
+        training_predictors = train_data.get("predictors") #train_npz[:, train_predictor_positions]
+    else:
+        for p in predictors:
+            if p not in predictor_names:
+                logger.warning(f"Predictor {p} is not a valid predictor name in data.")
+                raise ValueError(f"Predictor {p} is not a valid predictor name in data.")
+        
+        if training_predictors.shape[1] > len(predictors):
+            if predictor_names[-1] in predictors:
+                pred_index = predictor_names.index(predictor_names[-1])
+                tailing_predictors = training_predictors[:, pred_index:]
+  
+  
+  
     training_predictors = train_data.get("predictors")
     training_target = train_data.get(args.target_variable)
     train_prednms = train_data.get("predictor_names")
