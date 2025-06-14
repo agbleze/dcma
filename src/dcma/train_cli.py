@@ -218,7 +218,7 @@ def main():
                                                   _log_msg=f"Local file {args.local_test_data_path} Test Predictor{'s' if len(predictors) > 1 else ''}"
                                                   )
         
-    train_npz = train_data.get("preprocessed_data")
+    #train_npz = train_data.get("preprocessed_data")
     #training_target = train_npz[:, train_target_position]
     #training_predictors = train_npz[:, train_predictor_positions]
     predictor_names = train_data.get("predictor_names")
@@ -257,7 +257,7 @@ def main():
     
     
     
-    test_npz = test_data.get("preprocessed_data")
+    #test_npz = test_data.get("preprocessed_data")
     #testing_target = test_npz[:, test_target_position]
     #testing_predictors = test_npz[:, test_predictor_positions]
     testing_target = test_data.get(args.target_variable)
