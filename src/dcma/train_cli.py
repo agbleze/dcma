@@ -284,20 +284,6 @@ def main():
     run_with_mlflow(trainer=trainer, run_params=vars(args),
                     tracking_uri=args.mlflow_tracking_uri
                     )
-    # trainer.run_model_training_pipeline(cv=20, 
-    #                                     scoring=args.scoring, #['accuracy', "precision", "recall", "f1"],
-    #                                     model_result_metrics=args.model_result_metrics,
-                                        
-    #                                     # ['test_accuracy',  'train_accuracy',
-    #                                     #                       'test_precision', 'train_precision',
-    #                                     #                       'test_recall', 'train_recall',
-    #                                     #                       'test_f1', 'train_f1'
-    #                                     #                       ],
-    #                                     evaluation_metric=args.evaluation_metric, #"accuracy_score",
-    #                                     save_model_as=args.save_model_as, #"conversion_proba.model",
-    #                                     save_dir="model_store"
-    #                                     )
-    
 
 if __name__ == "__main__":
     main()
