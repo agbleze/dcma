@@ -271,8 +271,6 @@ def main():
         train_sample_weight = None
     logger.info(f"Train predictors shape: {training_predictors.shape}")
     logger.info(f"Test predictors shape: {testing_predictors.shape}")
-    #logger.info(f"Positions of predictors: {train_predictor_positions}")
-    #exit()
     trainer = ModelTrainer(training_predictors=training_predictors,
                             training_target=training_target,
                             testing_predictors=testing_predictors,
