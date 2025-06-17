@@ -1,6 +1,5 @@
 from train import ModelTrainer
 import argparse
-from utils import read_minio_data
 import pandas as pd
 from data_ingest import (get_bucket_records, download_from_minio,
                          get_minio_client,
