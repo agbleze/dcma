@@ -20,9 +20,6 @@ logging.basicConfig(level=logging.INFO,
 
 logger = logging.getLogger(__name__)
 
-
-
-
 def dynamic_log(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -31,8 +28,6 @@ def dynamic_log(func):
             pass
         
         
-    
-
 def parse_argumments():
     parser = argparse.ArgumentParser(description="Run Model training")
     parser.add_argument("--model_registry", type=str, default="mlflow",
