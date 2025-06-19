@@ -215,7 +215,7 @@ from data_ingest import (get_bucket_records, download_from_minio,
 
 # %%
 #get_minio_client()
-bucket_records = get_bucket_records(minio_client=client, bucket_name="rawdata")
+bucket_records = get_bucket_records(minio_client=client, bucket_name="conversion-preprocess-storage")
 # %%
 bucket_records[0].metadata
 
@@ -307,5 +307,60 @@ def func(name):
     B = name
     
 print(func("b"))
+
+# %%
+import mlflow
+from mlflow.models import Model
+import os
+
+model_uri = 'runs:/33646dba962b4586bec9d7a36ec4de60/model'
+# %%
+os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://localhost:9000" 
+os.environ["AWS_ACCESS_KEY_ID"] = "minioadmin"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "minioadmin"
+
+# %%
+pyfunc_model = mlflow.pyfunc.load_model("s3://mlflow-artifacts/33646dba962b4586bec9d7a36ec4de60/artifacts/model")
+# %%
+
+pyfunc_model
+
+
+
+#%%
+
+exp = [1,2,3,4,5]
+
+exp.remove(3)
+# %%
+exp
+# %%
+import numpy as np
+from sklearn.svm import OneClassSVM
+import matplotlib.pyplot as plt
+
+# Generate synthetic normal data (for example, 2D feature space)
+np.random.seed(42)
+X_train = np.random.normal(0, 1, (1000, 2))
+
+# Generate test data: normal + anomalies
+X_test_normal = np.random.normal(0, 1, (100, 2))
+X_test_anomalies = np.random.normal(5, 1, (10, 2))  # anomalous cluster far from normal
+X_test = np.vstack([X_test_normal, X_test_anomalies])
+
+# Train One-Class SVM
+oc_svm = OneClassSVM(kernel='rbf', gamma='scale', nu=0.05)
+oc_svm.fit(X_train)
+
+# Predict on test data (+1 means normal, -1 means anomaly)
+predictions = oc_svm.predict(X_test)
+
+# Visualize the results
+plt.figure(figsize=(8, 8))
+plt.scatter(X_test[:, 0], X_test[:, 1], c=predictions, cmap='coolwarm', edgecolors='k')
+plt.title("One-Class SVM Anomaly Detection")
+plt.xlabel("Feature 1")
+plt.ylabel("Feature 2")
+plt.show()
 
 # %%

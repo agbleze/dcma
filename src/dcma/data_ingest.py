@@ -231,6 +231,47 @@ def download_from_minio(minio_client: Minio, bucket_name: str, object_name: str,
         raise ValueError(f"Error downloading {object_name} from {bucket_name} bucket: {err}")
         
 
+def get_object_name(bucket_record, dataset_uid, split_type):
+    if (bucket_record.metadata.get("uid") == dataset_uid) and (bucket_record.metadata["split_type"] == split_type):
+        obj_name = bucket_record.object_name
+        if not obj_name:
+            logger.info(f"Retrieved {split_type} object name: {obj_name}")
+    else:
+        obj_name = None
+    return obj_name
+
+
+def get_positions(metadata: dict, variable_names: list, **kwargs):
+    custom_msg = kwargs.pop("_log_msg", None)
+    variables_not_found = [pred for pred in variable_names if pred not in metadata]
+    if variables_not_found:
+        logger.error(f"{custom_msg if custom_msg else ''} {variables_not_found} not found in metadata.")
+        raise ValueError(f"{custom_msg if custom_msg else ''} {variables_not_found} not found in metadata.")
+    var_positions = [metadata.get(var) for var in variable_names]
+    logger.info(f"{custom_msg if custom_msg else ''} '{variable_names}' {'are' if len(variable_names) > 1 else 'is'} at position{f's {var_positions} (indices)' if len(var_positions)>1 else f' {var_positions} (index)'}")
+    return var_positions
+
+
+
+
+def get_variable_position_from_minio_metadata(bucket_record, variable: list, 
+                                              split_type: str, 
+                                              dataset_uid: str,
+                                              **kwargs
+                                              ):
+    _log_msg = kwargs.pop("_log_msg", None)
+    if (bucket_record.metadata.get("uid") == dataset_uid) and (bucket_record.metadata["split_type"] == split_type):
+        var_position_metadata = bucket_record.metadata.get("column_position_map", {})
+        var_position_metadata = json.loads(var_position_metadata) if isinstance(var_position_metadata, str) else var_position_metadata
+        if isinstance(variable, str):
+            variable = [variable]
+        var_position = get_positions(metadata=var_position_metadata, variable_names=variable,
+                                     _log_msg=_log_msg
+                                     )
+    else:
+        var_position = None
+    return var_position
+
 
 def get_func_parameters(func):
     func_params = inspect.signature(func).parameters

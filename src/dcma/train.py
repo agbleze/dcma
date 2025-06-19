@@ -78,11 +78,6 @@ class ModelTrainer(object):
                     else:
                         raise ValueError(f"self.model_type not found in {self.algo_family}. Failed with error {e}")
                 
-          
-        # if self.model_type == "conversion_proba":
-        #     model = HistGradientBoostingClassifier(random_state=2025, 
-        #                                            class_weight="balanced"
-        #                                            ) 
         if "random_state" in model_params_signature:
             model = model(random_state=2025)
         else:
@@ -96,10 +91,6 @@ class ModelTrainer(object):
             else:
                 print(f"sample weight used: {include_sample_weight}")
                 model.fit(X=self.training_predictors, y=self.training_target)
-        # elif self.model_type == "cpa_pred":
-        #     model = HistGradientBoostingRegressor(random_state=2025)
-        #     if cv == 1:
-        #         model.fit(X=self.training_predictors, y=self.training_target)
         elif cv > 1:
             if include_sample_weight:
                 params = {"sample_weight": self.sample_weight}
@@ -150,6 +141,7 @@ class ModelTrainer(object):
     def save_model(self, save_model_as: str, save_dir: str = "model_store"):
         if not hasattr(self, "estimator"):
             raise ValueError(f"No trained model available. Model needs to be trained before it can be saved")
+        os.makedirs(save_dir, exist_ok=True)
         self.model_path = os.path.join(save_dir, save_model_as)
         joblib.dump(self.estimator, self.model_path)
         

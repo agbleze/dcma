@@ -419,6 +419,3 @@ class PreprocessPipeline(object):
 
 
 
-
-def main():
-    pass
