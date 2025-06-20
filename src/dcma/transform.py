@@ -137,6 +137,9 @@ def prepare_data(data: pd.DataFrame,
         target_data = None
         combined_data = all_predictors
         combined_columns = predictor_colnames_in_order
+        colpos = [combined_columns.index(i) for i in predictors]
+        [combined_columns.insert(embedding_colname, embedding_colname) for i in colpos]
+        
     else:
         target_data = data[target].values
     
