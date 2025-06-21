@@ -138,19 +138,29 @@ def prepare_data(data: pd.DataFrame,
         combined_data = all_predictors
         combined_columns = predictor_colnames_in_order
         colpos = [combined_columns.index(i) for i in predictors]
-        [combined_columns.insert(embedding_colname, embedding_colname) for i in colpos]
+        embedding_colpos = [combined_columns.insert(embedding_colname)]
+        for i in range(len(embedding_data.shape[1])):
+            embedding_colpos.append(embedding_colpos[-1] + (i+1))
+        colpos.append(embedding_colpos)
         
     else:
         target_data = data[target].values
     
         combined_data = np.hstack([target_data.reshape(-1,1), all_predictors])
         combined_columns = [target] + predictor_colnames_in_order
+        colpos = [combined_columns.index(i)]
+        colpos.extend([combined_columns.index(i) for i in predictors])
+        embedding_colpos = [combined_columns.insert(embedding_colname)]
+        for i in range(len(embedding_data.shape[1])):
+            embedding_colpos.append(embedding_colpos[-1] + (i+1))
+        colpos.append(embedding_colpos)
     
     return {"target": target_data,
             "predictors": all_predictors,
             "predictor_colnames_inorder": predictor_colnames_in_order,
             "full_data": combined_data,
-            "full_data_columns_in_order": combined_columns
+            "full_data_columns_in_order": combined_columns,
+            "full_data_columns_positions": colpos
             } 
            
 
