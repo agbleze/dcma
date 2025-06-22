@@ -164,7 +164,6 @@ def prepare_data(data: pd.DataFrame,
             } 
            
 
-
 def create_binary_conversion_variable(data: pd.DataFrame, 
                                       conversion_colname: str = "converions",
                                       save_binary_conversion_as: str = "convert"
