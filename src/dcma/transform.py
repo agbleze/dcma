@@ -87,16 +87,16 @@ def encode_with_embeddings(data: pd.DataFrame,
 def encode_multiple_data(data, variable_encoder_map: Dict,
                             encoder_values_colname
                             ):
-        df = None
-        for colname, encoder_df in variable_encoder_map.items():
-            
-            df = encode(data=data, colname_to_encode=colname,
-                        save_encoded_column_as=f"{colname}_encoded",
-                        encoder_data=encoder_df,
-                        encoder_values_colname=encoder_values_colname, 
-                        encoder_colname=colname
-                        )
-        return df
+    df = None
+    for colname, encoder_df in variable_encoder_map.items():
+        
+        df = encode(data=data, colname_to_encode=colname,
+                    save_encoded_column_as=f"{colname}_encoded",
+                    encoder_data=encoder_df,
+                    encoder_values_colname=encoder_values_colname, 
+                    encoder_colname=colname
+                    )
+    return df
 
 def transform_data_with_conversion(data: pd.DataFrame, variable_encoder_map: Dict,
                                     predictors, classifier, target="log_CPA",
