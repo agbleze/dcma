@@ -34,8 +34,6 @@ def encode(data: pd.DataFrame, colname_to_encode,
     return data
 
 
-
-
 def get_values_to_embedding_map(values_to_encode: list,
                                 model_name: str = "all-MiniLM-L6-v2"
                                 ):
