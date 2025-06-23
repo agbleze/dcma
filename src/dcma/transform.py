@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Union
 from sentence_transformers import SentenceTransformer
+from copy import deepcopy
 
 def get_encoded_values(encoder_data: pd.DataFrame, encoder_colname: str,
                        encoder_values_column: str,
@@ -137,20 +138,21 @@ def prepare_data(data: pd.DataFrame,
         combined_columns = predictor_colnames_in_order
         colpos = [combined_columns.index(i) for i in predictors]
         embedding_colpos = [combined_columns.insert(embedding_colname)]
+        embedding_starting_pos = deepcopy(embedding_colpos[-1])
         for i in range(len(embedding_data.shape[1])):
-            embedding_colpos.append(embedding_colpos[-1] + (i+1))
+            embedding_colpos.append(embedding_starting_pos[-1] + (i+1))
         colpos.append(embedding_colpos)
         
     else:
         target_data = data[target].values
-    
         combined_data = np.hstack([target_data.reshape(-1,1), all_predictors])
         combined_columns = [target] + predictor_colnames_in_order
         colpos = [combined_columns.index(i)]
         colpos.extend([combined_columns.index(i) for i in predictors])
         embedding_colpos = [combined_columns.insert(embedding_colname)]
+        embedding_starting_pos = deepcopy(embedding_colpos[-1])
         for i in range(len(embedding_data.shape[1])):
-            embedding_colpos.append(embedding_colpos[-1] + (i+1))
+            embedding_colpos.append(embedding_starting_pos[-1] + (i+1))
         colpos.append(embedding_colpos)
     
     return {"target": target_data,
