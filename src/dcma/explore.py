@@ -363,4 +363,11 @@ plt.xlabel("Feature 1")
 plt.ylabel("Feature 2")
 plt.show()
 
+#%%
+y_pred = torch.tensor([0.9], requires_grad=True)
+y_true = torch.tensor([1.0])
+loss = (y_pred - y_true) ** 2  # MSE
+loss.backward()
+print(y_pred.grad)  # → Non-zero gradient ✅
+
 # %%
