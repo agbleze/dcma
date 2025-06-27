@@ -11,5 +11,3 @@ python transform_cli.py  --read_data_from_minio \
         --upload_output_to_minio --augment_bucket_name "augment-data-store"
         
 
-
-     #--read_data_from_minio \
