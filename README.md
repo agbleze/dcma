@@ -1,6 +1,6 @@
 # dcma
 
-Package for training models and developing intelligenDecision-Making Configuration Algorithm
+Package for training models and developing intelligent Decision-Making Configuration Algorithm
 
 ## Installation
 
